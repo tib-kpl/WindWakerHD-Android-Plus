@@ -1,5 +1,5 @@
 # Builds the APK (-PwwhdDeviceRecomp: no game code in it) on every push and publishes it:
-# - a push to main  -> pre-release "build-<N>" (N = number of commits, also the versionCode)
+# - a push to main  -> release "build-<N>", marked latest (N = number of commits, also the versionCode)
 # - a "v*" tag      -> release "<tag>", notes from docs/release-notes/<tag>.md if present
 # - a pull request  -> build only, the APK is a workflow artifact
 #
@@ -80,14 +80,13 @@ jobs:
           code=$(git rev-list --count HEAD)
           base=$(sed -n 's/^wwhdVersionName=//p' android/gradle.properties)
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            name=${GITHUB_REF_NAME#v}; tag=$GITHUB_REF_NAME; pre=false
+            name=${GITHUB_REF_NAME#v}; tag=$GITHUB_REF_NAME
           else
-            name=$base-build.$code; tag=build-$code; pre=true
+            name=$base-build.$code; tag=build-$code
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "pre=$pre" >> "$GITHUB_OUTPUT"
 
       - name: Release key
         id: key
@@ -139,7 +138,5 @@ jobs:
             echo >> "$notes"
             echo "Built by GitHub Actions; it contains no code or data from the game." >> "$notes"
           fi
-          flags=()
-          [ "${{ steps.ver.outputs.pre }}" = true ] && flags+=(--prerelease --latest=false)
           gh release create "$TAG" out/*.apk --target "$GITHUB_SHA" \
-            --title "${{ steps.ver.outputs.name }}" --notes-file "$notes" "${flags[@]}"
+            --title "${{ steps.ver.outputs.name }}" --notes-file "$notes" --latest
