@@ -87,6 +87,10 @@
     <string name="space_title">Espaço livre insuficiente</string>
     <string name="space_text">Esta etapa precisa de cerca de %1$d MB livres; há %2$d MB livres. Libere espaço e tente de novo.</string>
     <string name="extract_failed">A extração falhou: %1$s</string>
+    <string name="storage_title">Onde colocar os arquivos do jogo?</string>
+    <string name="storage_item">%1$s (%2$.1f GB livres)</string>
+    <string name="work_preparing">Preparando…</string>
+    <string name="extract_key_hint">A chave do disco precisa ser a desta imagem de disco exata (geralmente com o nome da imagem, com .key), e common.key a chave comum do Wii U. Verifique se os dois arquivos não estão trocados e se cada um tem 32 dígitos hexadecimais (ou 16 bytes).</string>
     <string name="compile_running">Preparando o código do jogo para este aparelho…\n\nIsso acontece uma vez só e demora um pouco, dependendo do processador: alguns minutos em aparelhos rápidos, mais nos lentos. Você pode sair do app enquanto isso: ele continua em segundo plano (veja a notificação) e, se for fechado, continua de onde parou.</string>
     <string name="compile_detail">%1$d de %2$d partes (%3$d:%4$02d)</string>
     <string name="compile_failed">A preparação do código do jogo falhou: %1$s</string>

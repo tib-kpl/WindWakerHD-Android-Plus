@@ -76,6 +76,10 @@
     <string name="space_title">Espace de stockage insuffisant</string>
     <string name="space_text">Cette étape demande environ %1$d Mo d’espace libre ; %2$d Mo sont libres. Libérez de l’espace et réessayez.</string>
     <string name="extract_failed">L’extraction a échoué : %1$s</string>
+    <string name="storage_title">Où placer les fichiers du jeu ?</string>
+    <string name="storage_item">%1$s (%2$.1f Go libres)</string>
+    <string name="work_preparing">Préparation…</string>
+    <string name="extract_key_hint">La clé du disque doit être celle de cette image disque précise (souvent nommée comme l’image, avec .key), et common.key la clé commune de la Wii U. Vérifiez que les deux fichiers ne sont pas inversés et que chacun contient 32 chiffres hexadécimaux (ou 16 octets).</string>
     <string name="compile_running">Préparation du code du jeu pour cet appareil…\n\nCela ne se fait qu’une fois et prend un moment, selon le processeur de l’appareil : quelques minutes sur les appareils rapides, plus sur les plus lents. Vous pouvez quitter l’appli pendant ce temps : elle continue en arrière-plan (voir la notification), et si elle est fermée, elle reprend là où elle s’est arrêtée.</string>
     <string name="compile_detail">%1$d sur %2$d parties (%3$d:%4$02d)</string>
     <string name="compile_failed">La préparation du code du jeu a échoué : %1$s</string>

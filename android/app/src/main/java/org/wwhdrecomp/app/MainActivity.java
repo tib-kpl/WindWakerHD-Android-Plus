@@ -253,7 +253,61 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     private String gameDir() {
         String extra = debuggable() ? getIntent().getStringExtra("gameDir") : null;
         if (extra != null) return extra;
-        return new File(baseDir(), "game").getAbsolutePath();
+        return new File(gameRoot(), "game").getAbsolutePath();
+    }
+
+    // The game files (about 1.7 GB) can go on a memory card: this app's folder on each mounted
+    // storage volume (no permission needed). The rest (saves, settings, caches) stays in baseDir().
+    private File[] gameVolumes() {
+        List<File> l = new ArrayList<>();
+        for (File f : getExternalFilesDirs(null))
+            if (f != null && android.os.Environment.MEDIA_MOUNTED.equals(android.os.Environment.getExternalStorageState(f))) l.add(f);
+        return l.toArray(new File[0]);
+    }
+
+    private File volume(String path) {
+        if (path != null)
+            for (File f : gameVolumes())
+                if (f.getAbsolutePath().equals(path)) return f;
+        return null;
+    }
+
+    // where the game is: the volume of the last successful extraction, else (or with the card removed) baseDir()
+    private File gameRoot() {
+        File f = volume(prefs.getString("game_volume", null));
+        return f != null ? f : baseDir();
+    }
+
+    // where the next extraction goes: the volume chosen before picking the disc image
+    private File extractRoot() {
+        File f = volume(prefs.getString("extract_volume", null));
+        return f != null ? f : gameRoot();
+    }
+
+    // with a memory card, asks where the game files go (with the free space of each), then runs `then`
+    private void chooseGameVolume(Runnable then) {
+        File[] vols = gameVolumes();
+        if (vols.length < 2) {
+            prefs.edit().remove("extract_volume").apply();
+            then.run();
+            return;
+        }
+        android.os.storage.StorageManager sm = getSystemService(android.os.storage.StorageManager.class);
+        String[] names = new String[vols.length];
+        int current = 0;
+        for (int i = 0; i < vols.length; i++) {
+            android.os.storage.StorageVolume sv = sm.getStorageVolume(vols[i]);
+            String name = sv != null ? sv.getDescription(this) : vols[i].getAbsolutePath();
+            names[i] = getString(R.string.storage_item, name, new android.os.StatFs(vols[i].getAbsolutePath()).getAvailableBytes() / 1e9);
+            if (vols[i].equals(gameRoot())) current = i;
+        }
+        new AlertDialog.Builder(this).setTitle(R.string.storage_title)
+                .setSingleChoiceItems(names, current, (d, i) -> {
+                    d.dismiss();
+                    prefs.edit().putString("extract_volume", vols[i].getAbsolutePath()).apply();
+                    then.run();
+                })
+                .setNegativeButton(android.R.string.cancel, null).show();
     }
 
     private void applyEnvironment() {
@@ -541,6 +595,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             if (v instanceof android.widget.ProgressBar) {
                 ((android.widget.ProgressBar) v).setProgressTintList(android.content.res.ColorStateList.valueOf(0xFF8B5A2B));
                 ((android.widget.ProgressBar) v).setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFFD9C79E));
+                ((android.widget.ProgressBar) v).setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFF8B5A2B));
                 continue;
             }
             if (v instanceof TextView) {
@@ -568,7 +623,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         box.addView(t);
         Button extract = new Button(this);
         extract.setText(R.string.setup_extract);
-        extract.setOnClickListener(v -> pickFolder(PICK_DISC));
+        extract.setOnClickListener(v -> chooseGameVolume(() -> pickFolder(PICK_DISC)));
         box.addView(extract, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         Button retry = new Button(this);
         retry.setText(R.string.setup_retry);
@@ -1332,7 +1387,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
                     .setPositiveButton(android.R.string.ok, null).show();
             return;
         }
-        if (!enoughSpace(baseDir(), 2000L << 20)) {
+        if (!enoughSpace(extractRoot(), 2000L << 20)) {
             try {
                 android.os.ParcelFileDescriptor.adoptFd(fd).close();
             } catch (IOException ignored) {
@@ -1354,7 +1409,8 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
     // dk == null: fd is a .wua archive
     private void runExtraction(int fd, byte[] dk, byte[] ck) {
-        File base = baseDir(), work = new File(base, "game-extracting"), game = new File(gameDir());
+        File root = extractRoot(), work = new File(root, "game-extracting"), game = new File(root, "game");
+        File[] vols = gameVolumes();
         askNotifications();
         boolean ok = WorkService.Work.start(this, WorkService.Work.EXTRACT, () -> {
             Backup.deleteTree(work);
@@ -1362,7 +1418,13 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
                                     : Native.extractGame(fd, dk, ck, work.getAbsolutePath());
             if (err == null) {  // complete: swap it in for the old game folder
                 Backup.deleteTree(game);
-                if (!work.renameTo(game)) err = "cannot move the extracted files into place";
+                if (!work.renameTo(game)) {
+                    err = "cannot move the extracted files into place";
+                } else {  // the game is on this volume now; an older copy on another one is removed
+                    prefs.edit().putString("game_volume", root.getAbsolutePath()).commit();
+                    for (File v : vols)
+                        if (!v.equals(root)) Backup.deleteTree(new File(v, "game"));
+                }
             } else {
                 Backup.deleteTree(work);
             }
@@ -1386,8 +1448,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         box.addView(t);
         android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(1000);
+        bar.setIndeterminate(true);  // until the size is known (opening the image, removing an old copy)
         box.addView(bar);
         TextView detail = new TextView(this);
+        detail.setText(R.string.work_preparing);
         box.addView(detail);
         Button cancel = new Button(this);
         cancel.setText(android.R.string.cancel);
@@ -1409,11 +1473,14 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
                 long[] p = extract ? Native.extractProgress() : Native.compileProgress();
                 long s = WorkService.Work.elapsedSeconds();
                 if (p[1] > 0) {
+                    bar.setIndeterminate(false);
                     bar.setProgress((int) (p[0] * 1000 / p[1]));
                     mySea.setProgress((float) p[0] / p[1]);
                 }
-                if (extract) {
-                    if (p[1] > 0) detail.setText(getString(R.string.extract_detail, p[0] / 1048576, p[1] / 1048576, s > 0 ? p[0] / 1048576.0 / s : 0));
+                if (p[1] <= 0) {
+                    detail.setText(R.string.work_preparing);
+                } else if (extract) {
+                    detail.setText(getString(R.string.extract_detail, p[0] / 1048576, p[1] / 1048576, s > 0 ? p[0] / 1048576.0 / s : 0));
                 } else {
                     detail.setText(getString(R.string.compile_detail, p[0], p[1], s / 60, s % 60));
                 }
@@ -1425,8 +1492,17 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     /** A job of WorkService.Work finished (called on the main thread, possibly in a later activity). */
     void workFinished(int kind, String err, boolean cancelled) {
         if (kind == WorkService.Work.EXTRACT) {
-            if (err == null) checkAndStart();  // checks the extracted executable against this build
-            else showSetup(getString(R.string.extract_failed, err));
+            if (err == null) {
+                checkAndStart();  // checks the extracted executable against this build
+                return;
+            }
+            String msg = getString(R.string.extract_failed, err);
+            showSetup(msg);
+            if (cancelled) return;
+            // the setup screen shows a problem only with game files present: on a first setup it would go unseen
+            if (err.contains("key")) msg += "\n\n" + getString(R.string.extract_key_hint);
+            new AlertDialog.Builder(this).setTitle(R.string.setup_extract).setMessage(msg)
+                    .setPositiveButton(android.R.string.ok, null).show();
         } else if (err == null && !cancelled) {
             checkAndStart();
         } else {
