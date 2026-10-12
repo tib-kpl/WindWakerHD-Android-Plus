@@ -1,0 +1,430 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setup_text">Les fichiers du jeu sont introuvables ou ne correspondent pas à cette version.\n\nCette appli contient uniquement le code recompilé à partir de votre propre copie du jeu ; elle a besoin des fichiers du jeu extraits du même dump. Extrayez-les sur un ordinateur (voir README.md : tools/wudextract.py), puis copiez le dossier obtenu (avec code/, content/ et meta/ dedans) dans :\n\n%1$s\n\nPar exemple : adb push game /sdcard/Android/data/org.wwhdrecomp.app/files/\n\nProblème : %2$s</string>
+    <string name="touch_skip">Passer</string>
+    <string name="motion_source_pad">Actuellement : les capteurs de %1$s</string>
+    <string name="motion_source_device">Actuellement : les capteurs de cet appareil</string>
+    <string name="motion_source_device_no_pad">Actuellement : les capteurs de cet appareil (la manette utilisée n’en a pas)</string>
+    <string name="motion_source_off">Actuellement : désactivé</string>
+    <string name="gpu_safe_title">Mode sans échec GPU</string>
+    <string name="restart_needed">Ceci s’applique après un redémarrage.</string>
+    <string name="gpu_safe_notice">Le jeu s’est fermé la dernière fois à cause du pilote GPU (%2$s). Il tourne maintenant en mode sans échec GPU niveau %1$d, qui évite les fonctions que certains pilotes gèrent mal. Vous pouvez le changer dans Graphismes › Mode sans échec GPU.</string>
+    <string name="opt_gpu_safe">Mode sans échec GPU</string>
+    <string name="opt_gpu_safe_hint">S’active tout seul après un plantage du pilote GPU ; évite les fonctions que certains pilotes gèrent mal. S’applique après un redémarrage</string>
+    <string-array name="gpu_safe_modes">
+        <item>Désactivé</item>
+        <item>Basique</item>
+        <item>Maximum</item>
+    </string-array>
+    <string name="opt_ptbr">Traduction portugais (Brésil)</string>
+    <string name="opt_ptbr_hint">Le texte du jeu en portugais brésilien (traduction de fans Triforce-Heroes)</string>
+    <string name="ptbr_not_installed">non installée</string>
+    <string name="ptbr_about">Joue au jeu avec la traduction de fans en portugais brésilien de Triforce-Heroes (triforce-heroes.com.br). La traduction remplace le texte anglais : l’activer règle donc la langue du jeu sur l’anglais. Si elle n’est pas installée, choisissez son dossier (la version Cemu ou la version console, le dossier qui contient rules.txt).</string>
+    <string name="ptbr_install">Installer la traduction…</string>
+    <string name="ptbr_install_hint">Choisir le dossier de la traduction</string>
+    <string name="ptbr_install_other">Installer une autre version…</string>
+    <string name="ptbr_installed">Installée : %1$s</string>
+    <string name="ptbr_toggle_hint">S’applique après un redémarrage</string>
+    <string name="ptbr_remove">Supprimer la traduction</string>
+    <string name="ptbr_remove_confirm">Supprimer les fichiers de traduction installés ? Vous pourrez les réinstaller plus tard.</string>
+    <string name="ptbr_installing">Installation de la traduction…</string>
+    <string name="ptbr_failed">La traduction n’a pas pu être installée : %1$s</string>
+    <string name="ptbr_not_found">Aucun fichier de traduction (permanent_2d_*.pack) dans ce dossier.</string>
+    <string name="ptbr_on_restart">La traduction est activée et la langue du jeu est l’anglais. Redémarrez le jeu pour jouer en portugais.</string>
+    <string name="ptbr_off_restart">La traduction est désactivée. Redémarrez le jeu pour appliquer.</string>
+    <string name="opt_camera_stick">Stick caméra</string>
+    <string name="opt_camera_stick_hint">Un stick à droite qui tourne la caméra (déplacez-le dans Modifier la disposition tactile). Glisser sur la droite de l’écran fonctionne toujours</string>
+    <string name="opt_hud">Disposition du HUD</string>
+    <string name="opt_hud_hint">Déplacer, redimensionner ou masquer les cœurs, les rubis, les boutons et le reste du HUD du jeu</string>
+    <string name="hud_hidden">masqué</string>
+    <string name="hud_hide_all">Masquer le HUD</string>
+    <string name="hud_show_all">Afficher le HUD</string>
+    <string name="hud_edit_hint">Touchez un élément · glissez pour déplacer · poignée d’angle ou pincement pour redimensionner · 🗑 le masque, + l’affiche · ↺ réinitialise · ✓ ou Retour pour terminer</string>
+    <string-array name="hud_parts">
+        <item>Cœurs et magie</item>
+        <item>Rubis</item>
+        <item>Boutons d’objets</item>
+        <item>Petites clés</item>
+        <item>Boussole du vent et horloge</item>
+    </string-array>
+    <string name="opt_app_language">Langue de l’appli</string>
+    <string name="opt_app_language_hint">Les menus et messages de cette appli (le texte du jeu se règle dans Jeu › Langue du jeu, ou avec la traduction dans Mods)</string>
+    <string-array name="app_languages">
+        <item>Système</item>
+        <item>English</item>
+        <item>Português (Brasil)</item>
+        <item>Français</item>
+    </string-array>
+    <string name="pad_face_bottom">Bouton du bas (A / Croix)</string>
+    <string name="pad_face_right">Bouton de droite (B / Rond)</string>
+    <string name="pad_face_left">Bouton de gauche (X / Carré)</string>
+    <string name="pad_face_top">Bouton du haut (Y / Triangle)</string>
+    <string name="opt_menu_size">Taille des menus</string>
+    <string name="opt_menu_size_hint">Les menus s’adaptent seuls à l’écran ; ceci les rend plus petits ou plus grands.</string>
+    <string name="setup_retry">Vérifier à nouveau</string>
+    <string name="setup_welcome">Bienvenue !\n\nCette appli ne contient aucun fichier du jeu. Elle lance votre propre copie de The Legend of Zelda: The Wind Waker HD pour Wii U (version américaine, européenne ou japonaise).\n\nPlacez ces trois fichiers dans un même dossier sur cet appareil, puis choisissez ce dossier :\n•  votre image disque (.wux ou .wud)\n•  sa clé de disque (le nom de l’image avec .key)\n•  la clé commune de la console (common.key)\n\nOu placez une archive Cemu de votre jeu (.wua) dans un dossier ; elle n’a besoin d’aucune clé.\n\nL’appli extrait ensuite les fichiers du jeu (environ 1,7 Go) et prépare le code du jeu pour cet appareil. Cela ne se fait qu’une fois et prend un moment, selon le processeur de l’appareil.</string>
+    <string name="setup_problem">Les fichiers du jeu trouvés ne fonctionnent pas : %1$s</string>
+    <string name="setup_extract">Extraire depuis votre image disque ou .wua…</string>
+    <string name="extract_missing">Choisissez le dossier qui contient votre image disque, sa clé de disque et la clé commune de la console :\n\n%1$s l’image (.wux ou .wud)\n%2$s sa clé de disque (le nom de l’image avec .key)\n%3$s common.key\n\nOu un dossier qui contient une archive Cemu de votre jeu (.wua).</string>
+    <string name="extract_bad_key">Un fichier de clé doit contenir 16 octets ou 32 chiffres hexadécimaux.</string>
+    <string name="extract_running">Extraction des fichiers du jeu…</string>
+    <string name="extract_detail">%1$d sur %2$d Mo (%3$.0f Mo/s)</string>
+    <string name="extract_detail_short">%1$d sur %2$d Mo</string>
+    <string name="work_channel">Installation du jeu</string>
+    <string name="work_extracting">Extraction des fichiers du jeu</string>
+    <string name="work_compiling">Préparation du code du jeu</string>
+    <string name="space_title">Espace de stockage insuffisant</string>
+    <string name="space_text">Cette étape demande environ %1$d Mo d’espace libre ; %2$d Mo sont libres. Libérez de l’espace et réessayez.</string>
+    <string name="extract_failed">L’extraction a échoué : %1$s</string>
+    <string name="compile_running">Préparation du code du jeu pour cet appareil…\n\nCela ne se fait qu’une fois et prend un moment, selon le processeur de l’appareil : quelques minutes sur les appareils rapides, plus sur les plus lents. Vous pouvez quitter l’appli pendant ce temps : elle continue en arrière-plan (voir la notification), et si elle est fermée, elle reprend là où elle s’est arrêtée.</string>
+    <string name="compile_detail">%1$d sur %2$d parties (%3$d:%4$02d)</string>
+    <string name="compile_failed">La préparation du code du jeu a échoué : %1$s</string>
+    <string name="menu_about">À propos et licences</string>
+    <string name="compile_continue">Continuer</string>
+    <string name="compile_stopping">Arrêt…</string>
+    <string name="compile_cancelled">La préparation du code du jeu a été annulée. Elle reprendra là où elle s’est arrêtée au prochain lancement.</string>
+
+    <string name="menu_resolution">Résolution : %1$s</string>
+    <string name="res_title">Résolution de rendu</string>
+    <string name="res_original">Originale (%1$s)</string>
+    <string name="res_scaled_up">%1$s× (%2$s, plus de charge GPU)</string>
+    <string name="res_scaled_down">%1$s× (%2$s, moins de charge GPU)</string>
+    <string name="res_restart">La nouvelle résolution s’applique au redémarrage du jeu. La progression depuis votre dernière sauvegarde est perdue.</string>
+    <string name="res_restart_now">Redémarrer maintenant</string>
+    <string name="res_restart_later">Plus tard</string>
+    <string name="menu_fg">Génération d’images : %1$s</string>
+    <string name="menu_states">Sauvegardes instantanées…</string>
+    <string name="states_title">Sauvegardes instantanées</string>
+    <string name="state_slot">Emplacement %1$d %2$s</string>
+    <string name="state_empty">— vide</string>
+    <string name="state_incompatible">%1$s (d’une autre version, ne peut pas être chargée)</string>
+    <string name="state_save">Sauvegarder ici</string>
+    <string name="state_load">Charger</string>
+    <string name="state_overwrite">Remplacer la sauvegarde de l’emplacement %1$d ?</string>
+    <string name="menu_mods">Mods de gameplay…</string>
+    <string name="menu_aspect">Format d’image : %1$s</string>
+    <string name="aspect_title">Format de l’image</string>
+    <string-array name="aspect_modes">
+        <item>16:9 d’origine (bandes)</item>
+        <item>Étirer à l’écran</item>
+        <item>Remplir l’écran (bords coupés)</item>
+    </string-array>
+    <string name="menu_backup">Importer / exporter les sauvegardes…</string>
+    <string name="backup_title">Importer / exporter les sauvegardes</string>
+    <string name="backup_export">Exporter vers un dossier…</string>
+    <string name="backup_import">Importer depuis un dossier…</string>
+    <string name="backup_export_title">Exporter</string>
+    <string name="backup_game_save">Sauvegarde du jeu</string>
+    <string name="backup_states">Sauvegardes instantanées (%1$d Mo)</string>
+    <string name="backup_choose_folder">Choisir un dossier…</string>
+    <string name="backup_exporting">Exportation…</string>
+    <string name="backup_exported">Exporté dans le dossier « %1$s ».</string>
+    <string name="backup_scanning">Recherche des sauvegardes…</string>
+    <string name="backup_nothing">Aucune sauvegarde du jeu (cking.sav) ni sauvegarde instantanée (slot1–5.bin) dans ce dossier.</string>
+    <string name="backup_import_title">Importer (remplace l’existant)</string>
+    <string name="backup_import_save">Sauvegarde du jeu (du %1$s)</string>
+    <string name="backup_import_states">Sauvegardes instantanées : emplacement %1$s</string>
+    <string name="backup_import_go">Importer</string>
+    <string name="backup_importing">Importation…</string>
+    <string name="backup_imported_states">Sauvegardes instantanées importées. Celles d’une autre version de l’appli ne peuvent pas être chargées.</string>
+    <string name="backup_imported_save">Sauvegarde du jeu importée. Le jeu redémarre maintenant pour l’utiliser (l’ancienne sauvegarde est conservée dans save-before-import).</string>
+    <string name="backup_failed">Échec : %1$s</string>
+    <string name="mods_title">Mods de gameplay</string>
+    <string name="mod_direct_camera">Caméra directe au stick droit (sans lissage) : %1$s</string>
+    <string name="mod_camera_speed">Vitesse de la caméra directe : %1$.1f×</string>
+    <string name="mod_speed_title">Vitesse de la caméra directe</string>
+    <string name="mod_speed_item">%1$.1f×</string>
+    <string name="mod_first_person">Vue à la première personne sur R3 : %1$s</string>
+    <string name="mod_climb">Escalader tous les murs (jauge d’endurance ; B ou A pour lâcher) : %1$s</string>
+    <string name="mod_quick_doors">Portes rapides (vitesse ×4) : %1$s</string>
+    <string name="mod_fast_scenes">Changements de scène rapides (vitesse ×4) : %1$s</string>
+    <string name="fg_title">Génération d’images (Lossless Scaling)</string>
+    <string name="fg_about">Ajoute des images interpolées entre les images à 30 fps du jeu, grâce à la génération d’images de Lossless Scaling. Il faut votre propre copie de Lossless.dll, issue de votre installation de Lossless Scaling (Steam : steamapps/common/Lossless Scaling). Copiez-la sur cet appareil et choisissez-la ici. Les images générées affichent le jeu avec environ une image de retard.</string>
+    <string name="fg_no_dll">nécessite Lossless.dll</string>
+    <string name="fg_choose_dll">Choisir Lossless.dll…</string>
+    <string name="fg_replace_dll">Choisir un autre Lossless.dll…</string>
+    <string name="fg_remove_dll">Supprimer Lossless.dll</string>
+    <string name="fg_enabled">Génération d’images : %1$s</string>
+    <string name="fg_multiplier">Multiplicateur : ×%1$d (%2$d fps)</string>
+    <string name="fg_multiplier_title">Images par image du jeu</string>
+    <string name="fg_multiplier_item">×%1$d (%2$d fps)</string>
+    <string name="fg_mode">Réseau : %1$s</string>
+    <string name="fg_performance">Performances</string>
+    <string name="fg_quality">Qualité (plus de charge GPU)</string>
+    <string name="fg_flow_scale">Échelle du flux : %1$d %%</string>
+    <string name="fg_flow_title">Résolution de l’estimation du mouvement</string>
+    <string name="fg_flow_item">%1$d %%</string>
+    <string name="fg_ui_detection">Détection de l’interface : %1$s</string>
+    <string name="fg_bad_dll">Ce fichier n’est pas utilisable : %1$s</string>
+    <string name="fg_dll_untested">Lossless.dll est installé et la génération d’images est activée, mais cette version de ses shaders n’a pas été testée avec l’appli : les images générées peuvent être incorrectes. Si c’est le cas, choisissez un autre Lossless.dll (le README indique la version testée).</string>
+    <string name="fg_dll_tested_hint">Installé : une version testée</string>
+    <string name="fg_dll_untested_hint">Installé : une version non testée (les images peuvent être incorrectes)</string>
+    <string name="fg_not_working">ne fonctionne pas</string>
+    <string name="fg_error">La génération d’images ne fonctionne pas : %1$s</string>
+    <string name="fg_dll_ok">Lossless.dll est prêt et la génération d’images est activée.</string>
+    <string name="menu_layout">Disposition de l’écran : %1$s</string>
+    <string name="menu_controls_hide">Masquer les commandes tactiles</string>
+    <string name="menu_controls_show">Afficher les commandes tactiles</string>
+    <string name="menu_controls_size">Taille des commandes tactiles</string>
+    <string name="menu_controller">Les commandes émulent : %1$s</string>
+    <string name="controller_gamepad">GamePad Wii U</string>
+    <string name="controller_pro">Manette Pro Wii U</string>
+    <string name="menu_ao">Occlusion ambiante : %1$s</string>
+    <string name="menu_ao_hires">Profondeur d’occlusion en pleine taille : %1$s</string>
+    <string name="menu_aniso">Filtrage anisotrope 16x : %1$s</string>
+    <string name="menu_perf_hud">Overlay de performances (FPS, charge, températures) : %1$s…</string>
+    <string name="perf_title">Overlay de performances</string>
+    <string name="perf_show">Afficher l’overlay</string>
+    <string name="perf_fps">Fréquence d’images</string>
+    <string name="perf_frame">Temps par image</string>
+    <string name="perf_cpu">Charge CPU (cette appli)</string>
+    <string name="perf_gpu">Charge GPU (et temps de génération d’images)</string>
+    <string name="perf_temp_cpu">Température CPU</string>
+    <string name="perf_temp_gpu">Température GPU</string>
+    <string name="perf_temp_bat">Température de la batterie</string>
+    <string name="perf_settings">Réglages (résolution, effets, pilote GPU)</string>
+    <string name="perf_done">Terminé</string>
+    <string name="perf_move">Déplacer l’overlay</string>
+    <string name="perf_reset">Réinitialiser la position</string>
+    <string name="perf_move_hint">Glissez pour déplacer · touchez ailleurs pour terminer</string>
+    <!-- the in-game menu (OptionsMenu) -->
+    <string name="opt_saves">Sauvegardes</string>
+    <string name="opt_slot">Sauvegarde instantanée %1$d</string>
+    <string name="opt_slot_empty">Vide</string>
+    <string name="opt_slot_incompatible">%1$s · d’une autre version, ne peut pas être chargée</string>
+    <string name="opt_slot_save">Sauvegarder</string>
+    <string name="opt_slot_load">Charger</string>
+    <string name="opt_export">Exporter les sauvegardes</string>
+    <string name="opt_export_hint">Copier votre sauvegarde du jeu et vos sauvegardes instantanées dans un dossier</string>
+    <string name="opt_import">Importer des sauvegardes</string>
+    <string name="opt_import_hint">Les restaurer depuis un dossier ; importer une sauvegarde du jeu redémarre le jeu</string>
+    <string name="opt_auto_backup">Copie automatique des sauvegardes</string>
+    <string name="opt_auto_backup_hint">Garde une copie de votre sauvegarde du jeu dans Téléchargements/WindWakerHD Saves, qui survit à la désinstallation de l’appli</string>
+    <string name="restore_title">Restaurer votre sauvegarde ?</string>
+    <string name="restore_message">Il n’y a pas encore de sauvegarde. Si vous avez déjà joué (avec une version précédente de l’appli, ou une copie), choisissez le dossier qui la contient : le dossier « %1$s » dans Téléchargements contient les copies automatiques, ou choisissez un dossier dans lequel vous avez exporté. Vous pouvez aussi le faire plus tard dans Options > Sauvegardes > Importer des sauvegardes.</string>
+    <string name="restore_new_game">Nouvelle partie</string>
+    <string name="restore_pick">Choisir un dossier…</string>
+    <string name="opt_graphics">Graphismes</string>
+    <string name="opt_mods">Mods</string>
+    <string name="opt_controls">Commandes</string>
+    <string name="opt_back">Retour</string>
+    <string name="opt_ok">OK</string>
+    <string name="opt_cancel">Annuler</string>
+    <string name="opt_on">OUI</string>
+    <string name="opt_off">NON</string>
+    <string name="opt_pad_hint">Manette : maintenez Select ou appuyez sur Home pour ouvrir et fermer · L / R changent d’onglet · la croix déplace et change les valeurs · le bouton de droite sélectionne · le bouton du bas revient en arrière</string>
+    <string name="lang_restart">La nouvelle langue s’applique au redémarrage du jeu. La progression depuis votre dernière sauvegarde est perdue.</string>
+    <string name="opt_fps">Fréquence d’images</string>
+    <string name="opt_fps_hint">60 fps (générées) : le jeu tourne à ses 30 fps d’origine et une image sur deux est créée par le GPU à partir de la précédente (fluide sur la plupart des téléphones ; le HUD et les bords de l’écran peuvent montrer de petits artefacts). 60 fps dessine toutes les images et demande un téléphone rapide. Adaptatif passe à 30 fps stables quand l’appareil ne tient pas 60, puis réessaie automatiquement.</string>
+    <string-array name="fps_modes">
+        <item>30 fps</item>
+        <item>60 fps</item>
+        <item>60 fps (adaptatif)</item>
+        <item>Vrai 60 (expérimental)</item>
+    </string-array>
+    <string name="fps_40">40 fps (écran 120 Hz)</string>
+    <string name="fps_generated">60 fps (générées)</string>
+    <string name="opt_layout_edit">Modifier la disposition tactile</string>
+    <string name="opt_layout_edit_hint">Déplacer et redimensionner chaque commande sur une grille (aussi avec le bouton ✎ à côté de ≡)</string>
+    <string name="layout_edit_hint">Glissez pour déplacer · poignée d’angle ou pincement pour redimensionner · 🗑 retire la commande sélectionnée · + remet celles retirées · Retour annule</string>
+    <string name="layout_add_title">Touchez une commande pour la remettre</string>
+    <string name="opt_camera_sensitivity">Vitesse de la caméra au glissement</string>
+    <string name="opt_camera_sensitivity_hint">Glissez sur la droite de l’écran pour tourner la caméra ; touchez deux fois pour la recentrer</string>
+    <string name="opt_combat_buttons">Boutons de combat</string>
+    <string name="opt_combat_buttons_hint">Attaque sautée, coup vertical, attaque tourbillon et esquive en une touche</string>
+    <string-array name="combat_buttons">
+        <item>Avec une épée</item>
+        <item>Toujours</item>
+        <item>Masqués</item>
+    </string-array>
+    <string name="opt_haptics">Vibrer au toucher</string>
+    <string name="opt_cheats">Triches</string>
+    <string name="opt_cheats_hint">Objets, épée et bouclier, cœurs, santé infinie…</string>
+    <string name="cheat_note">Les triches modifient la sauvegarde chargée ; elles restent une fois la partie sauvegardée. Le jeu retire lui-même l’épée à la Forteresse Maudite et l’arc dans la Tour des Dieux.</string>
+    <string name="cheat_apply">Appliquer</string>
+    <string name="cheat_done">Triche appliquée</string>
+    <string name="cheat_items">Tous les objets</string>
+    <string name="cheat_sword">Meilleurs épée et bouclier</string>
+    <string name="cheat_stats">Cœurs, magie et bourse au maximum</string>
+    <string name="cheat_songs">Tous les chants</string>
+    <string name="cheat_triforce">Tous les fragments de Triforce</string>
+    <string name="cheat_dungeon">Carte, boussole et clé du boss (ce donjon)</string>
+    <string name="cheat_key">Une petite clé (ce donjon)</string>
+    <string name="cheat_story_hint">Progression de l’histoire : peut modifier ou casser des événements du scénario</string>
+    <string name="cheat_inf_health">Santé infinie</string>
+    <string name="cheat_inf_magic">Magie infinie</string>
+    <string name="cheat_inf_ammo">Flèches et bombes infinies</string>
+    <string name="opt_gyro_recalibrate">Recalibrer le gyroscope</string>
+    <string name="opt_gyro_recalibrate_hint">Tenez le téléphone comme pour jouer et appuyez : cette position devient « tout droit »</string>
+    <string name="gyro_recalibrated">Gyroscope recalibré</string>
+    <string name="opt_drawdone">Expérimental : GX2DrawDone</string>
+    <string name="opt_drawdone_hint">Laisse le jeu préparer l’image suivante pendant que le moteur de rendu travaille. Peut causer des défauts visuels : pour les tests uniquement.</string>
+    <string-array name="drawdone_modes">
+        <item>Attendre (par défaut)</item>
+        <item>Une image de retard</item>
+        <item>Sans attente</item>
+    </string-array>
+    <string name="opt_core_mode">Cœurs CPU</string>
+    <string name="opt_core_mode_hint">Où tournent le jeu et le moteur de rendu. Cœurs performance : moins de chauffe pour jouer longtemps. Cœur principal : rendu le plus rapide, chauffe le plus.</string>
+    <string-array name="core_modes">
+        <item>Automatique</item>
+        <item>Cœurs performance</item>
+        <item>Cœur principal (rendu)</item>
+        <item>Cœur principal (jeu)</item>
+    </string-array>
+    <string name="opt_resolution">Résolution de rendu</string>
+    <string name="opt_framegen">Génération d’images</string>
+    <string name="opt_aspect">Format d’image</string>
+    <string name="opt_render_aspect">Écran large</string>
+    <string name="opt_render_aspect_hint">Forme de l’écran : le jeu est rendu au format de votre écran et montre plus sur les côtés ; le HUD garde ses proportions aux bords de l’écran</string>
+    <string-array name="render_aspect_modes">
+        <item>16:9 d’origine</item>
+        <item>Forme de l’écran</item>
+    </string-array>
+    <string name="opt_layout">Disposition de l’écran</string>
+    <string name="opt_ao">Occlusion ambiante</string>
+    <string name="opt_bloom">Intensité du bloom</string>
+    <string name="opt_bloom_hint">Halo autour des zones lumineuses. 100 % correspond au jeu d’origine</string>
+    <string name="opt_ao_hires">Profondeur d’occlusion en pleine taille</string>
+    <string name="opt_aniso">Filtrage anisotrope 16×</string>
+    <string name="opt_distant_shadows">Ombres lointaines</string>
+    <string name="opt_distant_shadows_hint">Les ombres au loin. Désactivées : moins de travail GPU dans les forêts et les zones ouvertes, pour les téléphones moins puissants</string>
+    <string name="opt_perf">Overlay de performances</string>
+    <string name="opt_perf_hint">FPS, charge et températures</string>
+    <string name="opt_fg_choose_dll">Choisir Lossless.dll</string>
+    <string name="opt_fg_multiplier">Multiplicateur</string>
+    <string name="opt_fg_multiplier_hint">Images affichées par image du jeu</string>
+    <string name="opt_fg_network">Réseau</string>
+    <string name="opt_fg_flow">Échelle du flux</string>
+    <string name="opt_fg_flow_hint">Résolution de l’estimation du mouvement : plus bas est plus rapide</string>
+    <string name="opt_fg_ui">Détection de l’interface</string>
+    <string name="opt_fg_ui_hint">Garde les menus et le texte nets</string>
+    <string name="opt_fg_replace_dll">Choisir Lossless.dll</string>
+    <string name="opt_fg_remove_dll">Supprimer Lossless.dll</string>
+    <string name="opt_fg_remove_confirm">Supprimer Lossless.dll de l’appli ? La génération d’images est désactivée jusqu’à ce que vous le choisissiez à nouveau.</string>
+    <string name="opt_perf_move">Déplacer l’overlay</string>
+    <string name="opt_perf_move_hint">Ferme le menu : faites glisser l’overlay du doigt, touchez ailleurs pour terminer</string>
+    <string name="opt_perf_reset">Réinitialiser sa position</string>
+    <string name="opt_capture">Capturer une image</string>
+    <string name="opt_capture_hint">Pour le débogage : enregistrée dans le dossier de l’appli</string>
+    <string name="opt_mod_direct_camera">Caméra directe au stick droit</string>
+    <string name="opt_mod_direct_camera_hint">Sans lissage : la caméra suit le stick immédiatement</string>
+    <string name="opt_mod_camera_speed">Vitesse de la caméra directe</string>
+    <string name="opt_mod_first_person">Vue à la première personne sur R3</string>
+    <string name="opt_mod_climb">Escalader tous les murs</string>
+    <string name="opt_mod_climb_hint">Avec une jauge d’endurance ; B ou A pour lâcher</string>
+    <string name="opt_mod_quick_doors">Portes rapides</string>
+    <string name="opt_mod_fast_scenes">Changements de scène rapides</string>
+    <string name="opt_mod_speed_hint">Vitesse ×4</string>
+    <string name="opt_mod_ff_cutscenes">Accélérer les cinématiques</string>
+    <string name="opt_mod_ff_dialogues">Accélérer les dialogues</string>
+    <string name="opt_mod_ff_hint">Plus rapide (jusqu’à ×4, aussi vite que l’appareil peut afficher) tant que ZR (R2) est maintenu ; les boîtes de texte attendent toujours votre bouton</string>
+    <string name="opt_mod_run">Course plus rapide</string>
+    <string name="opt_mod_run_hint">Link avance plus vite en courant ; les sauts et roulades restent inchangés</string>
+    <string name="opt_mod_swim">Nage plus rapide</string>
+    <string name="opt_mod_swim_hint">Pareil quand Link nage</string>
+    <string name="opt_mod_run_off">Désactivé</string>
+    <string name="opt_mod_run_when">S’applique</string>
+    <string name="opt_mod_run_always">Toujours</string>
+    <string name="opt_mod_run_with_l3">Avec L3</string>
+    <string name="opt_mod_run_l3">L3</string>
+    <string name="opt_mod_run_l3_switch">Appui : activer / désactiver</string>
+    <string name="opt_mod_run_l3_hold">Maintenir</string>
+    <string name="opt_onscreen">Commandes tactiles</string>
+    <string name="opt_onscreen_size">Taille des commandes tactiles</string>
+    <string name="opt_controller">Les commandes émulent</string>
+    <string name="opt_states">Sauvegardes instantanées</string>
+    <string name="opt_backup">Importer / exporter les sauvegardes</string>
+    <string name="opt_game">Jeu</string>
+    <string name="opt_language">Langue du jeu</string>
+    <string name="opt_language_hint">Les langues de votre copie du jeu ; s’applique après un redémarrage</string>
+    <string name="language_restart">Le jeu utilisera la nouvelle langue après un redémarrage.</string>
+    <string name="opt_motion">Détection de mouvement</string>
+    <string name="opt_motion_hint">Viser en inclinant l’appareil, ou une manette avec capteurs de mouvement</string>
+    <string name="opt_rumble">Vibrations</string>
+    <string name="opt_rumble_hint">Sur la manette, ou sur cet appareil en jouant au tactile</string>
+    <string name="opt_buttons">Boutons de la manette</string>
+    <string name="opt_buttons_hint">Quel bouton de la manette appuie sur quel bouton Wii U</string>
+    <string name="opt_buttons_default">Par défaut</string>
+    <string name="opt_buttons_custom">Personnalisé</string>
+    <string name="opt_buttons_note">Choisissez un bouton Wii U, puis appuyez sur le bouton de la manette à lui associer. Un bouton déjà utilisé échange sa place, ainsi chaque bouton Wii U en garde un. Home / Guide et un appui long sur Select ouvrent toujours le menu, et le menu utilise toujours les boutons selon leur position.</string>
+    <string name="opt_buttons_press">Appuyez sur le bouton de la manette pour %1$s (actuellement : %2$s).\n\nHome / Guide ou Annuler le laisse tel quel.</string>
+    <string name="opt_buttons_reset">Rétablir par défaut</string>
+    <string-array name="wiiu_buttons">
+        <item>A</item>
+        <item>B</item>
+        <item>X</item>
+        <item>Y</item>
+        <item>L</item>
+        <item>R</item>
+        <item>ZL</item>
+        <item>ZR</item>
+        <item>− (moins)</item>
+        <item>+ (plus)</item>
+        <item>Clic du stick gauche</item>
+        <item>Clic du stick droit</item>
+        <item>Croix haut</item>
+        <item>Croix bas</item>
+        <item>Croix gauche</item>
+        <item>Croix droite</item>
+    </string-array>
+    <string name="opt_drc_display">Écran du GamePad</string>
+    <string name="opt_drc_display_hint">Un second écran a été détecté (par ex. l’écran du bas d’un appareil à double écran)</string>
+    <string name="drc_second_display">Second écran</string>
+    <string name="drc_in_layout">Dans la disposition de l’écran</string>
+    <string name="opt_gpu_driver">Pilote GPU</string>
+    <string name="opt_gpu_driver_hint">Celui du système, ou un paquet de pilote installé</string>
+    <string name="gpu_driver_about">Sur les GPU Adreno, le jeu peut utiliser un autre pilote Vulkan que celui du système, par exemple une version de Mesa Turnip ou un pilote Qualcomm plus récent. Utilisez des paquets de pilotes au format AdrenoTools (un .zip avec meta.json et le pilote), comme pour d’autres émulateurs. Un nouveau pilote s’applique après un redémarrage. Si le jeu ne démarre pas avec, le lancement suivant revient au pilote du système.</string>
+    <string name="gpu_driver_running">Utilisé actuellement : %1$s</string>
+    <string name="gpu_driver_fell_back">%1$s n’a pas pu être chargé, le pilote du système est donc utilisé. Le prochain lancement réessaiera avec lui.</string>
+    <string name="gpu_driver_system">Pilote du système</string>
+    <string name="gpu_driver_system_hint">Le pilote fourni avec l’appareil</string>
+    <string name="gpu_driver_install">Installer un paquet de pilote…</string>
+    <string name="gpu_driver_install_hint">Un .zip avec meta.json et le pilote</string>
+    <string name="gpu_driver_installing">Installation du paquet de pilote…</string>
+    <string name="gpu_driver_install_failed">Le paquet de pilote n’a pas pu être installé : %1$s</string>
+    <string name="gpu_driver_not_package">ce n’est pas un paquet de pilote (un .zip avec meta.json et le fichier .so du pilote)</string>
+    <string name="gpu_driver_installed">%1$s est installé. L’utiliser maintenant ? Le jeu redémarre.</string>
+    <string name="gpu_driver_use_now">Utiliser et redémarrer</string>
+    <string name="gpu_driver_later">Plus tard</string>
+    <string name="gpu_driver_use">Utiliser</string>
+    <string name="gpu_driver_remove">Supprimer</string>
+    <string name="gpu_driver_switch">Passer à %1$s ? Le jeu redémarre ; le premier lancement avec un autre pilote recompile ses pipelines et prend plus de temps.</string>
+    <string name="gpu_driver_remove_active">Ce pilote est utilisé. Le supprimer et redémarrer avec le pilote du système ?</string>
+    <string name="gpu_driver_failed">Le jeu n’a pas démarré avec le pilote GPU %1$s, il tourne donc à nouveau avec le pilote du système. Vous pouvez choisir à nouveau le pilote dans Graphismes › Pilote GPU.</string>
+    <string name="opt_shaders">Supprimer le cache des shaders</string>
+    <string name="opt_shaders_hint">Redémarre le jeu comme au premier lancement</string>
+    <string name="opt_about">À propos</string>
+    <string name="crash_title">Le jeu s’est fermé de façon inattendue</string>
+    <string name="crash_text">Un journal de plantage a été enregistré. Si vous signalez le problème (par exemple dans une issue sur GitHub), joignez-le s’il vous plaît. Il indique où le jeu a planté, la version de l’appli, la version du jeu, le modèle de votre appareil et les réglages utilisés. Il ne contient aucune donnée personnelle.</string>
+    <string name="crash_share">Partager le journal de plantage</string>
+    <string name="crash_share_all">Partager les journaux de plantage</string>
+    <string name="crash_not_now">Pas maintenant</string>
+    <string name="crash_subject">Journal de plantage Wind Waker HD</string>
+    <string name="opt_quit">Quitter</string>
+    <string name="menu_capture">Capturer une image (débogage)</string>
+    <string name="menu_clear_shaders">Supprimer le cache des shaders…</string>
+    <string name="clear_shaders_text">Le jeu redémarre sans son cache de shaders, comme au premier lancement : les shaders sont recompilés à mesure que les scènes apparaissent, donc la première visite de chaque scène charge plus lentement et peut saccader. Les sauvegardes, sauvegardes instantanées et réglages sont conservés. (La progression non sauvegardée est perdue.)</string>
+    <string name="clear_shaders_restart">Supprimer et redémarrer</string>
+    <string name="menu_quit">Quitter</string>
+    <string name="on">activé</string>
+    <string name="off">désactivé</string>
+    <string name="layout_title">Disposition de l’écran</string>
+    <string name="ao_title">Occlusion ambiante</string>
+    <string name="text_title">Saisir du texte</string>
+    <string name="text_message">Jusqu’à %1$d caractères.</string>
+
+    <string-array name="layouts">
+        <item>TV avec le GamePad en incrustation</item>
+        <item>TV et GamePad côte à côte</item>
+        <item>TV seule</item>
+        <item>GamePad avec la TV en incrustation</item>
+        <item>Hybride : TV, GamePad en plein écran dans les menus</item>
+    </string-array>
+    <string-array name="ao_modes">
+        <item>Originale (comme sur Wii U)</item>
+        <item>Correction du centre</item>
+        <item>Correction du centre + du bruit</item>
+        <item>Désactivée</item>
+    </string-array>
+</resources>
