@@ -12,7 +12,9 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore: ['**.md', 'docs/**']   # no new APK for documentation-only commits
   pull_request:
+    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
 permissions:

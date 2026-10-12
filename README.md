@@ -1,5 +1,25 @@
 # Wind Waker HD Recompiled for Android — Plus
 
+> 🇫🇷 **Ce dépôt est un fork de [Nycolazs/WindWakerHD-Android-Plus](https://github.com/Nycolazs/WindWakerHD-Android-Plus)**
+> pour la **traduction française** et quelques petits correctifs.
+>
+> - **Appli en français** : tous les menus, réglages et messages de l'appli sont traduits. Un
+>   téléphone en français l'affiche directement ; sinon, choisissez **Français** dans
+>   *Game → App language* (*Jeu → Langue de l'appli*). Le texte du jeu se règle à part, dans
+>   *Jeu → Langue du jeu*.
+> - **Petits correctifs** par-dessus la version Plus.
+> - **APK compilé automatiquement** à chaque commit par GitHub Actions et publié sur la
+>   **[page Releases](../../releases)**. Comme l'original, il ne contient ni code ni fichier du jeu.
+>
+> **Vous venez de la version Plus originale ?** Ces APK sont signés avec une autre clé : Android
+> refuse de les installer par-dessus. Exportez d'abord vos sauvegardes (**≡ → Saves → Export
+> saves**), désinstallez l'ancienne appli, installez celle-ci puis importez-les. Sans sauvegarde,
+> l'appli propose au premier lancement de reprendre la copie automatique de
+> `Download/WindWakerHD Saves`.
+>
+> *This is a fork of Nycolazs/WindWakerHD-Android-Plus that adds a French translation of the app
+> and small fixes. The rest of this README is the original project's.*
+
 **The Legend of Zelda: The Wind Waker HD**, running natively on Android phones and tablets.
 This is a static recompilation of the Wii U game: its PowerPC code is turned into native ARM64 code
 on your device, and its graphics run directly on Vulkan. It is **not an emulator**.
@@ -42,7 +62,7 @@ for crashes on Adreno 650 and on 6 GB phones.
 
 ## Download
 
-Get the latest APK from the **[Releases page](../../releases/latest)**.
+Get the latest APK from the **[Releases page](../../releases)**.
 
 **Requirements**
 - Android 11 or newer, 64-bit ARM (arm64-v8a)
@@ -154,7 +174,7 @@ Put **one** of these in a folder on your phone (for example `Download/WindWakerH
 | **B. Disc image** | your `.wud` or `.wux` image, its disc key (same name as the image, ending in `.key`), and the console's `common.key` |
 
 ### 2. Install and set up
-1. Install the APK from the [Releases page](../../releases/latest). Allow installing from your
+1. Install the APK from the [Releases page](../../releases). Allow installing from your
    browser or file manager if Android asks.
 2. Open the app and tap **Extract from your disc image or .wua…**, then select the folder.
 3. The app extracts the game (about 1.7 GB), then **prepares the game code for your phone**. This
