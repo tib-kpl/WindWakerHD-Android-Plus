@@ -1,0 +1,143 @@
+# Builds the APK (-PwwhdDeviceRecomp: no game code in it) on every push and publishes it:
+# - a push to main  -> pre-release "build-<N>" (N = number of commits, also the versionCode)
+# - a "v*" tag      -> release "<tag>", notes from docs/release-notes/<tag>.md if present
+# - a pull request  -> build only, the APK is a workflow artifact
+#
+# Signing (repository secrets; without them the APK is built with a debug key and not published):
+#   KEYSTORE_BASE64    base64 of the .jks (base64 -w0 wwhd-release.jks)
+#   KEYSTORE_PASSWORD  its password (PKCS12: the same for the key, whose alias is wwhd)
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NDK_VERSION: 27.2.12479018
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the commit count is the versionCode
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk/2[0-6]* /opt/ghc /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY/CodeQL"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install NDK, CMake and Ninja
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION" "platforms;android-36" "cmake;3.22.1"
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      # LLVM for the on-device recompiler: long to build, so cached until build-llvm.sh changes
+      - name: Restore LLVM
+        id: llvm
+        uses: actions/cache/restore@v4
+        with:
+          path: build/llvm/install
+          key: llvm-android-${{ env.NDK_VERSION }}-${{ hashFiles('tools/android/build-llvm.sh') }}
+
+      - name: Build LLVM
+        if: steps.llvm.outputs.cache-hit != 'true'
+        run: |
+          tools/android/build-llvm.sh
+          rm -rf build/llvm/src build/llvm/host build/llvm/android
+
+      - name: Save LLVM
+        if: steps.llvm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/llvm/install
+          key: ${{ steps.llvm.outputs.cache-primary-key }}
+
+      - name: Version
+        id: ver
+        run: |
+          code=$(git rev-list --count HEAD)
+          base=$(sed -n 's/^wwhdVersionName=//p' android/gradle.properties)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            name=${GITHUB_REF_NAME#v}; tag=$GITHUB_REF_NAME; pre=false
+          else
+            name=$base-build.$code; tag=build-$code; pre=true
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "pre=$pre" >> "$GITHUB_OUTPUT"
+
+      - name: Release key
+        id: key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::no KEYSTORE_BASE64 secret: debug-signed APK, not published"
+            echo "signed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          cat > android/keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/release.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=wwhd
+          keyPassword=$KEYSTORE_PASSWORD
+          EOF
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          ./gradlew assembleRelease -PwwhdDeviceRecomp \
+            -PwwhdVersionCode=${{ steps.ver.outputs.code }} -PwwhdVersionName=${{ steps.ver.outputs.name }}
+          mkdir -p ../out
+          cp app/build/outputs/apk/release/*.apk ../out/WindWakerHD-Plus-${{ steps.ver.outputs.name }}.apk
+          rm -f keystore.properties "$RUNNER_TEMP/release.jks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WindWakerHD-Plus-${{ steps.ver.outputs.name }}
+          path: out/*.apk
+
+      - name: Publish release
+        if: github.event_name != 'pull_request' && steps.key.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" out/*.apk --clobber
+            exit 0
+          fi
+          notes=docs/release-notes/$TAG.md
+          if [ ! -f "$notes" ]; then
+            notes=$RUNNER_TEMP/notes.md
+            echo "Automatic build of $(git rev-parse --short HEAD): $(git log -1 --format=%s)" > "$notes"
+            echo >> "$notes"
+            echo "Built by GitHub Actions; it contains no code or data from the game." >> "$notes"
+          fi
+          flags=()
+          [ "${{ steps.ver.outputs.pre }}" = true ] && flags+=(--prerelease --latest=false)
+          gh release create "$TAG" out/*.apk --target "$GITHUB_SHA" \
+            --title "${{ steps.ver.outputs.name }}" --notes-file "$notes" "${flags[@]}"
