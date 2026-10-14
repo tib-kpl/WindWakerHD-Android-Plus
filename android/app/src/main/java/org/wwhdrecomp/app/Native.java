@@ -53,6 +53,14 @@ final class Native {
     static native String gpuName();
     /** True if the chosen installed driver couldn't be loaded and the system's runs instead. */
     static native boolean gpuDriverFellBack();
+
+    /** The icon font's glyph cells for `codes` (ui_icons.cpp): 8-byte header (cell width, height, little-endian) and RGBA8 cells; null if unsupported. */
+    static native byte[] fontCells(byte[] font, int[] codes);
+    /** Writes RGBA8 cells (as fontCells returns them, without the header) into `font`, in place. */
+    static native boolean patchFontCells(byte[] font, int[] codes, byte[] cells);
+
+    /** The shader cache's replay at start: {state (0 not started, 1 loading, 2 done), bytes read, file size, shaders prepared}. */
+    static native long[] cacheProgress();
     /** Why frame generation couldn't start, or "" (it runs, or it is off). */
     static native String frameGenError();
 

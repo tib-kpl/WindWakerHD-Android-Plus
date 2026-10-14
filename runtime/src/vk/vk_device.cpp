@@ -24,6 +24,7 @@
 #include "lsfg.h"
 #include "reproj.h"
 #include "platform.h"
+#include "interp.h"
 #include "runtime.h"
 #include "vk.h"
 #include "vk_window.h"
@@ -114,6 +115,7 @@ Upload upload(const void* data, VkDeviceSize size, VkDeviceSize align) {
     memcpy(u.ptr, data, size);
     return u;
 }
+
 
 VkDescriptorSet alloc_descriptor_set(VkDescriptorSetLayout layout) {
     for (int attempt = 0; attempt < 2; attempt++) {
@@ -245,6 +247,7 @@ void record_thread_main() {
             pi.pImageIndices = &job.imageIndex;
             VkResult r;
             {
+                std::lock_guard<std::mutex> sl(R.swapchainMutex);
                 std::lock_guard<std::mutex> lk(R.queueMutex);
                 r = vkQueuePresentKHR(R.queue, &pi);
             }
@@ -301,6 +304,7 @@ void record_thread_main() {
                 std::lock_guard<std::mutex> lk(R.queueMutex);
                 VK_CHECK(vkQueueSubmit(R.queue, 1, &si, fence));
             }
+            rec::crumbs_submitted();
             g_record_cpu_ns.fetch_add(thread_cpu_ns() - cpu0, std::memory_order_relaxed);
             g_record_stream_bytes.fetch_add(streamBytes, std::memory_order_relaxed);
             g_record_streams.fetch_add(1, std::memory_order_relaxed);
@@ -712,7 +716,8 @@ static bool has_ext(const std::vector<VkExtensionProperties>& exts, const char* 
 }
 
 // one pipeline cache per driver (a user-installed GPU driver and the system's keep their own);
-// pipelines.vkcache is the name builds before that used
+// pipelines.vkcache and pipelines-*.vkcache are the names of builds before (the latter holds pipelines
+// of shaders translated before strictMul: not loaded, so they don't stay in the cache for good)
 static std::string pipeline_cache_path(bool legacy = false) {
     std::string dir = config::cache_dir.empty() ? "." : config::cache_dir;
     if (legacy) return dir + "/pipelines.vkcache";
@@ -724,15 +729,40 @@ static std::string pipeline_cache_path(bool legacy = false) {
     mix(&R.props.deviceID, 4);
     mix(R.props.pipelineCacheUUID, VK_UUID_SIZE);
     char name[40];
-    snprintf(name, sizeof name, "/pipelines-%08x.vkcache", h);
+    snprintf(name, sizeof name, "/pipelines2-%08x.vkcache", h);
     return dir + name;
+}
+static std::string pipeline_cache_path_v1() {
+    std::string p = pipeline_cache_path();
+    return p.replace(p.rfind("/pipelines2-"), 12, "/pipelines-");
+}
+
+// Qualcomm's older drivers (v502 on the Adreno 640/650, issue #25) sometimes build broken pipelines
+// when several threads create them at once with a pipeline cache; the GPU then hangs each time one is
+// drawn with (about every second start on a Mi 9, mostly in the first seconds while the shader cache
+// is replayed). Not with one thread at a time (0 in 25 starts), nor without the cache, nor with a
+// cache for each thread (5 in 15). There pipelines are created one at a time; the shaders' translation
+// stays parallel. The tablet's v762 never hung. WWHD_SERIAL_PIPELINES=0/1 overrides.
+static bool serial_pipelines() {
+    static const bool on = [] {
+        if (const char* e = getenv("WWHD_SERIAL_PIPELINES")) return strcmp(e, "0") != 0;
+        const uint32_t v = (R.props.driverVersion >> 12) & 0x3FF;
+        return R.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY && v < 700;
+    }();
+    return on;
+}
+static std::mutex g_pipeline_mutex;  // with serial_pipelines: creation and saving the cache
+
+VkResult create_graphics_pipeline(const VkGraphicsPipelineCreateInfo* ci, VkPipeline* out) {
+    if (!serial_pipelines()) return vkCreateGraphicsPipelines(R.device, R.pipelineCache, 1, ci, nullptr, out);
+    std::lock_guard<std::mutex> lk(g_pipeline_mutex);
+    return vkCreateGraphicsPipelines(R.device, R.pipelineCache, 1, ci, nullptr, out);
 }
 
 static void load_pipeline_cache() {
     std::vector<uint8_t> data;
     if (const char* e = getenv("WWHD_SHADER_CACHE"); !(e && !strcmp(e, "0"))) {
         FILE* f = fopen(pipeline_cache_path().c_str(), "rb");
-        if (!f) f = fopen(pipeline_cache_path(true).c_str(), "rb");  // the header check below decides if it fits
         if (f) {
             fseek(f, 0, SEEK_END);
             long n = ftell(f);
@@ -757,6 +787,10 @@ static void load_pipeline_cache() {
             data.clear();
         }
     }
+    if (getenv("WWHD_NO_PIPELINE_CACHE")) {  // debug: pipelines compiled without the driver's cache
+        LOG("[vk] pipeline cache off (WWHD_NO_PIPELINE_CACHE)");
+        return;
+    }
     VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     ci.initialDataSize = data.size();
     ci.pInitialData = data.empty() ? nullptr : data.data();
@@ -767,20 +801,30 @@ static void load_pipeline_cache() {
         VK_CHECK(vkCreatePipelineCache(R.device, &ci, nullptr, &R.pipelineCache));
     }
     if (!data.empty()) LOG("[vk] pipeline cache: %zu KiB", data.size() / 1024);
+    if (serial_pipelines()) LOG("[vk] pipelines are created one at a time (%s)", R.driverInfo.c_str());
 }
 
+// render thread (every 1800 frames with new pipelines) and UI thread (app paused)
 void save_caches() {
     if (!R.pipelineCache) return;
     if (const char* e = getenv("WWHD_SHADER_CACHE"); e && !strcmp(e, "0")) return;
+    static std::mutex saving;
+    std::lock_guard<std::mutex> sl(saving);
+    std::unique_lock<std::mutex> lk(g_pipeline_mutex, std::defer_lock);
+    if (serial_pipelines()) lk.lock();
     size_t n = 0;
     if (vkGetPipelineCacheData(R.device, R.pipelineCache, &n, nullptr) != VK_SUCCESS || !n) return;
     std::vector<uint8_t> data(n);
     if (vkGetPipelineCacheData(R.device, R.pipelineCache, &n, data.data()) != VK_SUCCESS) return;
+    lk = {};
     std::string path = pipeline_cache_path(), tmp = path + ".tmp";
     if (FILE* f = fopen(tmp.c_str(), "wb")) {
         bool ok = fwrite(data.data(), 1, n, f) == n;
         ok &= fclose(f) == 0;
-        if (ok && rename(tmp.c_str(), path.c_str()) == 0) remove(pipeline_cache_path(true).c_str());
+        if (ok && rename(tmp.c_str(), path.c_str()) == 0) {
+            remove(pipeline_cache_path(true).c_str());
+            remove(pipeline_cache_path_v1().c_str());
+        }
     }
 }
 
@@ -1125,7 +1169,7 @@ VkPipeline create_present_pipeline(VkRenderPass pass) {
     pi.layout = g_present_layout;
     pi.renderPass = pass;
     VkPipeline p;
-    VK_CHECK(vkCreateGraphicsPipelines(R.device, R.pipelineCache, 1, &pi, nullptr, &p));
+    VK_CHECK(create_graphics_pipeline(&pi, &p));
     return p;
 }
 
@@ -1163,13 +1207,43 @@ void request_window_frame_rate(ANativeWindow* window, float hz, int8_t compatibi
         r = ANativeWindow_setFrameRate(window, hz, compatibility);
     if (r) LOG("[vk] window frame-rate request %.1f Hz failed: %d", hz, r);
 }
-
-// g_window_mutex held; true if a swapchain is ready. `main`: the game window (frame generation
-// presents there); else the GamePad's own display
+// The display rate the window asks for, from the frames shown per second (30, or what frame
+// interpolation draws: interp::frames_per_step). Frame generation presents a steady multiple of it
+// (a 144 Hz panel can't space 60 or 120 fps evenly; 120 Hz can); without it at least 60 Hz, more for
+// interpolation at 120 fps. Checked every frame (the frame rate setting changes during play); Android
+// is asked only when it changes, or for a new window (force).
+static bool no_60hz_request() {
+    static const bool off = getenv("WWHD_NO_60HZ") != nullptr;
+    return off;
+}
 // frame generation: the LSFG network (lsfg.cpp, the user's Lossless.dll) or the built-in reprojection
 // (reproj.cpp, "60 fps (generated)"); both present through present_frame_fg and its present thread
 static bool gen_on() { return fg::loaded() || rp::enabled(); }
 static int gen_multiplier() { return rp::enabled() ? 2 : fg::config().multiplier; }
+static float g_rate_requested = -1.0f;
+static void request_display_rate(ANativeWindow* window, bool force) {
+    if (!window) return;
+    const int shown = 30 * interp::frames_per_step();
+    float rate;
+    int8_t compat = ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT;
+    if (gen_on()) {
+        // the built-in reprojection doubles the game's own 30 fps; LSFG multiplies what is drawn
+        rate = (float)((rp::enabled() ? 30 : shown) * gen_multiplier());
+        compat = ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE;
+    } else {
+        // without it the game flips at most 60 times a second (more with interpolation): let a 90/120 Hz
+        // panel drop to 60 Hz (from pull request #8 by SSunnKing, 62a723b); WWHD_NO_60HZ=1 leaves it alone
+        rate = no_60hz_request() ? 0.0f : (float)std::max(60, shown);
+        if (interp::mode40()) rate = 120.0f;  // 40 fps: a frame every 3 refreshes of a 120 Hz panel
+    }
+    if (!force && rate == g_rate_requested) return;
+    g_rate_requested = rate;
+    request_window_frame_rate(window, rate, compat);
+    LOG("[vk] display rate requested: %.0f Hz%s", rate, gen_on() ? " (frame generation)" : "");
+}
+
+// g_window_mutex held; true if a swapchain is ready. `main`: the game window (frame generation
+// presents there); else the GamePad's own display
 
 bool ensure_swapchain(Swapchain& sc, bool main = true) {
     if (!sc.window) return false;
@@ -1188,13 +1262,7 @@ bool ensure_swapchain(Swapchain& sc, bool main = true) {
         vkGetPhysicalDeviceSurfaceSupportKHR(R.pd, R.queueFamily, sc.surface, &ok);
         if (!ok) LOG("[vk] warning: queue family %u reports no present support", R.queueFamily);
     }
-    // frame generation presents at a steady multiple of the game's 30 fps: ask for a display mode
-    // that is a multiple of it (a 144 Hz panel can't space 60 or 120 fps evenly; 120 Hz can)
-    if (main && gen_on()) request_window_frame_rate(sc.window, 30.0f * gen_multiplier(),
-                                                        ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
-    // without it the game flips at most 60 times a second: let a 90/120 Hz panel drop to 60 Hz
-    // (40 fps: 120 Hz, a frame every 3 refreshes; present_frame follows a switch)
-    else request_window_frame_rate(sc.window, main && interp::mode40() ? 120.0f : 60.0f, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT);
+    if (main) request_display_rate(sc.window, true);
     VkSurfaceCapabilitiesKHR caps{};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(R.pd, sc.surface, &caps);
     uint32_t n = 0;
@@ -1413,14 +1481,7 @@ bool present_frame() {
     std::lock_guard<std::mutex> wl(g_window_mutex);
     if (g_present_outdated.exchange(false, std::memory_order_acquire)) g_sc.stale = true;
     if (!ensure_swapchain(g_sc)) return false;
-    {  // the frame rate setting changed between 40 fps (120 Hz panel) and the others (60 Hz)
-        static bool asked40 = false;
-        bool want40 = interp::mode40();
-        if (want40 != asked40 && !gen_on()) {
-            request_window_frame_rate(g_sc.window, want40 ? 120.0f : 60.0f, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT);
-            asked40 = want40;
-        }
-    }
+    request_display_rate(g_sc.window, false);
     VkSemaphore acquire;
     if (!g_acquire_free.empty()) {
         acquire = g_acquire_free.back();
@@ -1431,7 +1492,11 @@ bool present_frame() {
     }
     uint32_t idx = 0;
     // a short timeout: a window that isn't being composited must not stall the game
-    VkResult r = vkAcquireNextImageKHR(R.device, g_sc.sc, 100 * 1000000ull, acquire, VK_NULL_HANDLE, &idx);
+    VkResult r;
+    {
+        std::lock_guard<std::mutex> sl(R.swapchainMutex);
+        r = vkAcquireNextImageKHR(R.device, g_sc.sc, 100 * 1000000ull, acquire, VK_NULL_HANDLE, &idx);
+    }
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_TIMEOUT || r == VK_NOT_READY || r < 0) {
         if (r != VK_TIMEOUT && r != VK_NOT_READY) g_sc.stale = true;
         g_acquire_free.push_back(acquire);  // unsignaled
@@ -1475,6 +1540,7 @@ bool present_frame() {
         pi.pSwapchains = &g_sc.sc;
         pi.pImageIndices = &idx;
         {
+            std::lock_guard<std::mutex> sl(R.swapchainMutex);
             std::lock_guard<std::mutex> lk(R.queueMutex);
             r = vkQueuePresentKHR(R.queue, &pi);
         }
@@ -1501,7 +1567,11 @@ void present_drc_window() {
         VK_CHECK(vkCreateSemaphore(R.device, &si, nullptr, &acquire));
     }
     uint32_t idx = 0;
-    VkResult r = vkAcquireNextImageKHR(R.device, g_sc_drc.sc, 10 * 1000000ull, acquire, VK_NULL_HANDLE, &idx);
+    VkResult r;
+    {
+        std::lock_guard<std::mutex> sl(R.swapchainMutex);
+        r = vkAcquireNextImageKHR(R.device, g_sc_drc.sc, 10 * 1000000ull, acquire, VK_NULL_HANDLE, &idx);
+    }
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_TIMEOUT || r == VK_NOT_READY || r < 0) {
         if (r != VK_TIMEOUT && r != VK_NOT_READY) g_sc_drc.stale = true;
         g_drc_acquire_free.push_back(acquire);
@@ -1541,6 +1611,7 @@ void present_drc_window() {
         pi.pSwapchains = &g_sc_drc.sc;
         pi.pImageIndices = &idx;
         {
+            std::lock_guard<std::mutex> sl(R.swapchainMutex);
             std::lock_guard<std::mutex> lk(R.queueMutex);
             r = vkQueuePresentKHR(R.queue, &pi);
         }
@@ -1615,7 +1686,11 @@ bool fg_present(const Image* img) {
     PresentSlot& ps = g_fg_slots[g_fg_next];
     vkWaitForFences(R.device, 1, &ps.fence, VK_TRUE, UINT64_MAX);
     uint32_t idx = 0;
-    VkResult r = vkAcquireNextImageKHR(R.device, g_sc.sc, 100 * 1000000ull, ps.acquire, VK_NULL_HANDLE, &idx);
+    VkResult r;
+    {
+        std::lock_guard<std::mutex> sl(R.swapchainMutex);
+        r = vkAcquireNextImageKHR(R.device, g_sc.sc, 100 * 1000000ull, ps.acquire, VK_NULL_HANDLE, &idx);
+    }
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_TIMEOUT || r == VK_NOT_READY || r < 0) {
         if (r != VK_TIMEOUT && r != VK_NOT_READY) g_sc.stale = true;
         return false;
@@ -1688,6 +1763,7 @@ bool fg_present(const Image* img) {
     pi.pSwapchains = &g_sc.sc;
     pi.pImageIndices = &idx;
     {
+        std::lock_guard<std::mutex> sl(R.swapchainMutex);
         std::lock_guard<std::mutex> lk(R.queueMutex);
         VK_CHECK(vkQueueSubmit(R.queue, 1, &si, ps.fence));
         r = vkQueuePresentKHR(R.queue, &pi);
@@ -1853,8 +1929,7 @@ void apply_frame_generation() {
     else if (r.on) fg::load(r.cfg);  // logs why if the DLL can't be used
     // present mode (FIFO with frame generation) and the display rate hint differ: new swapchain
     std::lock_guard<std::mutex> wl(g_window_mutex);
-    if (g_sc.window && !gen_on())
-        request_window_frame_rate(g_sc.window, 60.0f, ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT);
+    if (g_sc.window) request_display_rate(g_sc.window, true);
     g_sc.stale = true;
 }
 
@@ -1871,6 +1946,7 @@ bool present_frame_fg() {
         if (!g_sc.window) return false;
         w = (uint32_t)ANativeWindow_getWidth(g_sc.window);
         h = (uint32_t)ANativeWindow_getHeight(g_sc.window);
+        request_display_rate(g_sc.window, false);
     }
     if (!w || !h) return false;
     if (w != g_comp.img.width || h != g_comp.img.height) {
@@ -2404,6 +2480,7 @@ std::deque<VkFence> g_fw_pending;
 std::vector<VkFence> g_fw_free;
 
 void frame_waiter_thread() {
+    platform::set_thread_name("GX2 frame wait");
     for (;;) {
         VkFence f;
         {
@@ -2521,6 +2598,21 @@ static void perf_frame() {
 }
 const char* driver_info() { return R.driverInfo.c_str(); }
 const char* gpu_name() { return R.device ? R.props.deviceName : ""; }
+
+// `gpu_lost` in the working directory (the app's files folder, jni_main.cpp): the GPU and the driver
+// that lost the device; MainActivity offers another GPU driver at the next start. Old Qualcomm
+// drivers (v502 on the Adreno 640/650) hang on this game (issue #25); Turnip doesn't.
+void vk_note_device_lost() {
+    static std::atomic<bool> noted{false};
+    if (noted.exchange(true)) return;
+    if (FILE* f = fopen("gpu_lost", "w")) {
+        const char* custom = getenv("WWHD_GPU_DRIVER_DIR");
+        fprintf(f, "%s\n%s\n%s\n", R.device ? R.props.deviceName : "", R.driverInfo.c_str(), custom ? custom : "");
+        fclose(f);
+    }
+    LOG("[vk] device lost (%s, %s): the next start offers another GPU driver", R.device ? R.props.deviceName : "?", R.driverInfo.c_str());
+    rec::crumbs_report();
+}
 bool driver_fallback() { return g_driver_fallback; }
 
 void perf_stats(float out[7]) {
@@ -2542,7 +2634,7 @@ void swap() {
     // the upstream ADPF session (platform.cpp) would compete with ours on the same threads
     // (android/perf_hint.cpp, game + render thread work); WWHD_UPSTREAM_PERF_HINT=1 uses it too
     static const bool upstreamHint = getenv("WWHD_UPSTREAM_PERF_HINT") != nullptr;
-    if (upstreamHint) platform::perf_hint_frame();
+    if (upstreamHint) platform::perf_hint_frame(interp::frames_per_step());
     prof_frame();
     latch_resolution_scale();
     apply_frame_generation();
@@ -2582,6 +2674,26 @@ void swap() {
     }
     // keep the driver's compiled pipelines across launches (the app can be killed at any time)
     static size_t savedPipelines = 0;
+    if (R.frame % 1800 == 0) {  // once a minute at 30 fps: the trend shows in the log a crash log carries
+        char pn[200];
+        platform::process_numbers(pn, sizeof pn);
+        LOG("[proc] %s", pn);
+        // the renderer's images (textures, render targets): they're kept for the whole session
+        size_t n = 0, bytes = 0, targets = 0;
+        for (auto& [addr, surf] : R.surfaces) {
+            n++;
+            if (surf->gpuWritten) targets++;
+            if (surf->img.alloc) {
+                VmaAllocationInfo ai{};
+                vmaGetAllocationInfo(R.vma, surf->img.alloc, &ai);
+                bytes += ai.size;
+            }
+        }
+        VmaTotalStatistics vs{};
+        vmaCalculateStatistics(R.vma, &vs);
+        LOG("[gfx] memory: %zu surfaces (%zu rendered to), %.0f MB in their images; all Vulkan memory %.0f MB in %u blocks",
+            n, targets, bytes / 1048576.0, vs.total.statistics.blockBytes / 1048576.0, vs.total.statistics.blockCount);
+    }
     if (R.frame % 1800 == 0 && pipelines_created() != savedPipelines) {
         savedPipelines = pipelines_created();
         save_caches();

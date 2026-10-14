@@ -4,6 +4,8 @@
     <string name="touch_skip">Pular</string>
     <string name="opt_bloom">Intensidade do bloom</string>
     <string name="opt_bloom_hint">Brilho em volta das áreas claras. 100% é igual ao jogo original</string>
+    <string name="opt_area_blur">Desfoque fiel ao console</string>
+    <string name="opt_area_blur_hint">Acima de 1x de resolução: remove a grade fina nas sombras e em volta de objetos no chão. Custa tempo de GPU</string>
     <string name="opt_mod_ff_cutscenes">Acelerar cutscenes</string>
     <string name="opt_mod_ff_dialogues">Acelerar diálogos</string>
     <string name="opt_mod_ff_hint">Mais rápido (até 4×, o quanto este aparelho conseguir desenhar) enquanto o ZR (R2) estiver apertado; as caixas de texto ainda esperam o seu botão</string>
@@ -11,6 +13,9 @@
     <string name="crash_text">Um registro do travamento foi salvo. Se você relatar o problema (por exemplo como uma issue no GitHub), anexe-o. Ele mostra onde o jogo travou, a versão do app, a versão do jogo, o modelo do seu aparelho e as configurações em uso. Ele não contém dados pessoais.</string>
     <string name="crash_share">Compartilhar registro do travamento</string>
     <string name="crash_share_all">Compartilhar registros de travamento</string>
+    <string name="crash_start_game">Iniciar o jogo</string>
+    <string name="cache_loading">Carregando o cache de shaders…</string>
+    <string name="cache_loading_detail">%1$,d variantes de shader preparadas</string>
     <string name="crash_not_now">Agora não</string>
     <string name="crash_subject">Registro de travamento do Wind Waker HD</string>
     <string name="motion_source_pad">Agora: os sensores de %1$s</string>
@@ -163,6 +168,7 @@
     <string name="fg_multiplier">Multiplicador: ×%1$d (%2$d fps)</string>
     <string name="fg_multiplier_title">Quadros por quadro do jogo</string>
     <string name="fg_multiplier_item">×%1$d (%2$d fps)</string>
+    <string name="fg_multiplier_item_over">×%1$d (%2$d fps: mais do que a tela mostra, sem quadros gerados)</string>
     <string name="fg_mode">Rede: %1$s</string>
     <string name="fg_performance">Desempenho</string>
     <string name="fg_quality">Qualidade (mais carga na GPU)</string>
@@ -229,15 +235,16 @@
     <string name="opt_pad_hint">Controle: segure Select ou aperte Home para abrir e fechar · L / R trocam de aba · D-pad navega e muda valores · botão da direita seleciona · botão de baixo volta</string>
     <string name="lang_restart">O novo idioma vale quando o jogo reiniciar. O progresso desde o último save é perdido.</string>
     <string name="opt_fps">Taxa de quadros</string>
-    <string name="opt_fps_hint">60 fps (gerado): o jogo roda nos seus 30 e cada quadro intermediário é criado pela GPU a partir do último (liso na maioria dos celulares; pode haver pequenos defeitos no HUD e nas bordas da tela). 60 fps desenha todos os quadros e precisa de um celular rápido. O adaptativo passa para 30 estáveis quando o aparelho não aguenta 60 e tenta de novo sozinho.</string>
+    <string name="opt_fps_hint">60 fps (gerado): o jogo roda nos seus 30 e cada quadro intermediário é criado pela GPU a partir do último (liso na maioria dos celulares; pode haver pequenos defeitos no HUD e nas bordas da tela). 60 e 120 fps interpolam quadros na CPU e precisam de um celular rápido; quando um quadro não fica pronto a tempo ele é pulado e o jogo mantém a velocidade</string>
     <string-array name="fps_modes">
         <item>30 fps</item>
         <item>60 fps</item>
-        <item>60 fps (adaptativo)</item>
+        <item>60 fps</item>
         <item>True 60 (experimental)</item>
     </string-array>
     <string name="fps_40">40 fps (tela de 120 Hz)</string>
     <string name="fps_generated">60 fps (gerado)</string>
+    <string name="fps_120">120 fps (tela de 120 Hz)</string>
     <string name="opt_layout_edit">Editar controles de toque</string>
     <string name="opt_layout_edit_hint">Mova e redimensione cada controle numa grade (também pelo botão ✎ ao lado do ≡)</string>
     <string name="layout_edit_hint">Arraste para mover · alça no canto ou pinça para redimensionar · 🗑 remove o controle selecionado · + traz de volta os removidos · Voltar cancela</string>
@@ -254,6 +261,13 @@
     <string name="opt_haptics">Vibrar ao tocar</string>
     <string name="opt_cheats">Trapaças</string>
     <string name="opt_cheats_hint">Itens, espada e escudo, corações, vida infinita…</string>
+    <string name="opt_button_style">Ícones dos botões</string>
+    <string name="opt_button_style_hint">Os símbolos dos botões nos controles de toque e no jogo (HUD e textos): Wii U, Xbox ou PlayStation, seguindo os botões do controle que você configurou. Os ícones do jogo mudam depois de reiniciar</string>
+    <string-array name="button_styles">
+        <item>Wii U (Nintendo)</item>
+        <item>Xbox</item>
+        <item>PlayStation</item>
+    </string-array>
     <string name="cheat_note">As trapaças alteram o save carregado; elas ficam depois que o jogo é salvo. O próprio jogo tira a espada na Forsaken Fortress e o arco na Tower of the Gods.</string>
     <string name="cheat_apply">Aplicar</string>
     <string name="cheat_done">Trapaça aplicada</string>
@@ -268,6 +282,14 @@
     <string name="cheat_inf_health">Vida infinita</string>
     <string name="cheat_inf_magic">Magia infinita</string>
     <string name="cheat_inf_ammo">Flechas e bombas infinitas</string>
+    <string name="cheat_moon_jump">Moon jump (pulo lunar)</string>
+    <string name="cheat_moon_jump_hint">Segure L (botão de ombro esquerdo) para subir, guie com o analógico esquerdo</string>
+    <string name="cheat_moon_rise">Moon jump: velocidade de subida</string>
+    <string name="cheat_moon_fly">Moon jump: velocidade de voo</string>
+    <string name="cheat_moon_nofall">Moon jump: sem dano de queda</string>
+    <string name="cheat_moon_nofall_hint">Pousar depois de um voo nunca machuca</string>
+    <string name="cheat_moon_anims">Moon jump: animações de decolagem aleatórias</string>
+    <string name="cheat_moon_anims_hint">Cada decolagem escolhe uma de 14 poses em vez das duas poses de pulo</string>
     <string name="opt_gyro_recalibrate">Recalibrar giroscópio</string>
     <string name="opt_gyro_recalibrate_hint">Segure o celular como você joga e toque: essa posição vira a frente</string>
     <string name="gyro_recalibrated">Giroscópio recalibrado</string>
@@ -395,7 +417,26 @@
     <string name="gpu_driver_not_package">isto não é um pacote de driver (um .zip com meta.json e o arquivo .so do driver)</string>
     <string name="gpu_driver_installed">%1$s está instalado. Usar agora? O jogo reinicia.</string>
     <string name="gpu_driver_use_now">Usar e reiniciar</string>
+    <string name="gpu_lost_title">O driver da GPU parou de responder</string>
+    <string name="gpu_lost_system">O jogo fechou da última vez porque o driver de GPU do celular travou:\n%1$s\n\nIsso pode acontecer com drivers de sistema com defeito. Um driver Turnip costuma rodar o jogo. Escolha um pacote de driver (um .zip no formato AdrenoTools, por exemplo um Turnip recente para o seu Adreno) para usá-lo daqui em diante, ou inicie o jogo assim mesmo.</string>
+    <string name="gpu_lost_custom">O jogo fechou da última vez porque o driver de GPU instalado travou:\n%1$s\n\nVolte ao driver do sistema, escolha outro pacote de driver ou inicie o jogo com este de novo.</string>
+    <string name="gpu_lost_unknown_driver">(driver desconhecido)</string>
+    <string name="gpu_lost_start">Iniciar o jogo</string>
+    <string name="gpu_lost_choose">Escolher um arquivo de driver…</string>
+    <string name="gpu_lost_choose_other">Outro arquivo de driver…</string>
+    <string name="gpu_lost_system_driver">Voltar ao driver do sistema</string>
     <string name="gpu_driver_later">Depois</string>
+    <string name="rotation_title">Rotação da tela</string>
+    <string name="rotation_message">O sistema deste celular mantém a tela na vertical e ignora que o jogo é só na horizontal, então o jogo aparece numa faixa. Permita que o app altere a configuração de rotação: ele trava a tela na horizontal enquanto você joga (seguindo o lado em que você segura o celular) e devolve a sua configuração quando você sai do jogo.</string>
+    <string name="rotation_allow">Permitir</string>
+    <string name="opt_record_thread">Thread de gravação de comandos</string>
+    <string name="opt_record_thread_hint">Uma segunda thread da CPU prepara o trabalho da GPU: mais rápido na maioria dos aparelhos, mais lento em alguns (ex.: Snapdragon 855)</string>
+    <string-array name="record_thread_modes">
+        <item>Automático</item>
+        <item>Ligado</item>
+        <item>Desligado</item>
+    </string-array>
+    <string name="record_thread_restart">A configuração vale depois de reiniciar.</string>
     <string name="gpu_driver_use">Usar</string>
     <string name="gpu_driver_remove">Remover</string>
     <string name="gpu_driver_switch">Trocar para %1$s? O jogo reinicia; o primeiro início com outro driver compila os pipelines de novo e demora mais.</string>

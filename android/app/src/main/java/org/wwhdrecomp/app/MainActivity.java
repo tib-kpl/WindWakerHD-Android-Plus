@@ -109,7 +109,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             setenv("WWHD_LANGUAGE", gameLanguage());
             applyFrameGenSettings();
             setenv("WWHD_APP_VERSION", CrashLogs.appVersion(this));  // the crash log's name
-            gpuSafeAtStart();
+            // command recording thread: automatic (the renderer decides), on or off (wwhd.env still wins)
+            int recordThread = prefs.getInt("record_thread", 0);
+            if (recordThread != 0) setenv("WWHD_RECORD_THREAD", recordThread == 1 ? "1" : "0");
+            gpuSafeAtStart();  // after it: safe mode level 2 records on the render thread
             applyEnvironment();
             CrashLogs.deleteShared(this, prefs);  // shared in an earlier run
             // a shader dump (WWHD_DUMP_SHADERS=<files>/shaders, debugging) left from an earlier start
@@ -156,6 +159,15 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         prefs.edit().putString("language", l).commit();
     }
 
+    // the command recording thread applies from the next start
+    void setRecordThread(int mode) {
+        if (mode == prefs.getInt("record_thread", 0)) return;
+        prefs.edit().putInt("record_thread", mode).commit();
+        new GameDialog(this).title(R.string.opt_record_thread).message(R.string.record_thread_restart)
+                .button(R.string.gpu_driver_later, null)
+                .button(R.string.res_restart_now, this::restartApp).show();
+    }
+
     /** after the options menu closed with another language than it opened with */
     // ---- the Brazilian Portuguese translation (Translation.java)
     File ptbrDir() { return Translation.dir(this, baseDir()); }
@@ -175,6 +187,35 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
                 .button(R.string.res_restart_now, this::restartApp).show();
     }
 
+    // ---- the button style mod (ButtonStyle): the touch controls' letters at once, the game's own
+    // icons (its icon font in the 2D packs, over the translation when it is on) from the next start
+    int buttonStyle() { return prefs.getInt("button_style", ButtonStyle.WIIU); }
+
+    void setButtonStyle(int style) {
+        if (style == buttonStyle()) return;
+        prefs.edit().putInt("button_style", style).commit();
+        if (controls != null) controls.setButtonLabels(ButtonStyle.touchLabels(style));
+        askRestart(R.string.opt_button_style);
+    }
+
+    // the folder whose content/ files the game reads instead of its own ("" none): the button style
+    // mod's packs (made here when needed), else the translation's
+    private String contentOverlay() {
+        File base = baseDir();
+        int style = buttonStyle();
+        if (style != ButtonStyle.WIIU) {
+            InputMapper m = new InputMapper();
+            m.loadMap(prefs.getString("pad_map", ""));
+            File[] sources = ptbrEnabled() ? new File[] {ptbrDir(), new File(gameDir())} : new File[] {new File(gameDir())};
+            long t0 = android.os.SystemClock.uptimeMillis();
+            String err = ButtonStyle.build(base, sources, style, m.map);
+            if (err != null) Log.w(TAG, "button style: " + err);
+            Log.i(TAG, "button style " + style + " ready in " + (android.os.SystemClock.uptimeMillis() - t0) + " ms");
+            if (ButtonStyle.ready(base)) return ButtonStyle.dir(base).getAbsolutePath();
+        }
+        return ptbrEnabled() ? ptbrDir().getAbsolutePath() : "";
+    }
+
     void removePtbr() {
         prefs.edit().putBoolean("mod_ptbr", false).commit();
         Translation.remove(ptbrDir());
@@ -187,6 +228,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     // system's. The level stays until changed in Graphics.
     static final int GPU_SAFE_MAX = 2;
     private String gpuCrashReason;  // the last session's, shown once the game screen is up
+    private String crashedDriver;   // an installed driver the last session crashed in (now the system's runs)
 
     File gpuCrashFile() { return new File(baseDir(), "gpu_crash.txt"); }
 
@@ -204,8 +246,20 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             }
             //noinspection ResultOfMethodCallIgnored
             f.delete();
-            if (!prefs.getString("gpu_driver", "").isEmpty()) prefs.edit().putString("gpu_driver", "").commit();  // custom driver: back to the system's
-            else setGpuSafeLevel(gpuSafeLevel() + 1);
+            String custom = prefs.getString("gpu_driver", "");
+            if (custom.isEmpty()) setGpuSafeLevel(gpuSafeLevel() + 1);
+            else {
+                // an installed driver: not the safe mode's business. A hang (gpu_lost) is offered a
+                // choice before the game starts (offerGpuDriverAfterLoss); any other crash goes back to
+                // the system driver, named once the game runs. Its .probe goes too: choosing the driver
+                // again is a fresh try.
+                gpuCrashReason = null;
+                if (!new File(baseDir(), "gpu_lost").exists()) {
+                    crashedDriver = gpuDriverLabel();
+                    GpuDrivers.clearProbe(this, custom);
+                    prefs.edit().putString("gpu_driver", "").commit();
+                }
+            }
         }
         setenv("WWHD_GPU_CRASH_FILE", f.getAbsolutePath());
         int l = gpuSafeLevel();
@@ -395,6 +449,18 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             runCompile();
             return;
         }
+        // the last run ended unexpectedly: offer its log before the game starts (a game that closes
+        // again right after loading leaves no time to share it later)
+        if (!crashOffered) {
+            crashOffered = true;
+            CrashLogs.recordExit(this, prefs);
+            if (CrashLogs.offerNew(this, prefs, this::checkAndStart)) return;
+        }
+        // the GPU driver lost the device last time (it hung): offer another driver before the game starts
+        if (!gpuLostOffered) {
+            gpuLostOffered = true;
+            if (offerGpuDriverAfterLoss(this::checkAndStart)) return;
+        }
         File base = baseDir();
         if (!new File(base, "save/user/cking.sav").exists()) AutoBackup.startedWithoutSave(prefs);
         autoBackup();  // what the last run saved (it may have ended without a pause)
@@ -407,24 +473,27 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             }, "icons").start();
         }
         String failedDriver = applyGpuDriver();
+        if (failedDriver == null) failedDriver = crashedDriver;
+        crashedDriver = null;
         if (Translation.hasBuiltIn(this)) {  // the built-in Portuguese translation, from the player's own pack (once)
             String terr = Translation.installBuiltIn(this, ptbrDir(), new File(gameDir()));
             if (terr != null) Log.w(TAG, "translation: " + terr);
         }
-        Native.setContentOverlay(ptbrEnabled() ? ptbrDir().getAbsolutePath() : "");
+        Native.setContentOverlay(contentOverlay());
         Native.start(gameDir(), new File(base, "save").getAbsolutePath(),
                 new File(getNoBackupFilesDir(), "shadercache").getAbsolutePath(), base.getAbsolutePath());
         started = true;
         applyOptions();
         startMotion();
         showGame();
+        showCacheLoading();
         updateDrcDisplay();
         checkControllerConnected();
         showGpuCrashNotice();
         if (failedDriver != null)
             new GameDialog(this).title(R.string.opt_gpu_driver).message(getString(R.string.gpu_driver_failed, failedDriver))
                     .button(R.string.opt_ok, null).show();
-        else if (!offerRestore()) CrashLogs.offerNew(this, prefs);  // the last run crashed
+        else offerRestore();  // a crash log was offered before the game started (checkAndStart)
     }
 
     // ------------------------------------------------------------------ save backups
@@ -443,6 +512,68 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
                 .button(R.string.restore_new_game, null)
                 .button(R.string.restore_pick, () -> pickFolder(PICK_IMPORT)).show();
         return true;
+    }
+
+    private RotationGuard rotationGuard;  // landscape where the system ignores the orientation
+    private boolean crashOffered;  // once per process: the offer before the game starts
+    private boolean gpuLostOffered;
+
+    // `gpu_lost` (vk_device.cpp, vk_note_device_lost): the GPU driver hung or crashed in the last run.
+    // Old Qualcomm drivers (v502 on Snapdragon 855/865) do that with this game; a Turnip driver
+    // runs it (issue #25). On Adreno GPUs: a driver file can be chosen right away, or the game
+    // starts as it is. `then` continues the start (also after the picker, unless the new driver
+    // restarts the app).
+    private boolean offerGpuDriverAfterLoss(Runnable then) {
+        File note = new File(baseDir(), "gpu_lost");
+        if (!note.exists()) return false;
+        // the note: GPU, the driver that ran (as Vulkan names it), the installed driver package's
+        // folder if one was loaded (empty: the system driver)
+        String driver = "", packageDir = "";
+        try (BufferedReader r = new BufferedReader(new FileReader(note))) {
+            r.readLine();  // GPU
+            String d = r.readLine();
+            if (d != null) driver = d.trim();
+            String p = r.readLine();
+            if (p != null) packageDir = p.trim();
+        } catch (IOException ignored) {
+        }
+        //noinspection ResultOfMethodCallIgnored
+        note.delete();
+        if (!GpuDrivers.supported()) return false;
+        if (driver.isEmpty()) driver = getString(R.string.gpu_lost_unknown_driver);
+        GameDialog d = new GameDialog(this).title(R.string.gpu_lost_title).cancelable(false);
+        if (packageDir.isEmpty()) {  // the system driver hung
+            d.message(getString(R.string.gpu_lost_system, driver))
+                    .button(R.string.gpu_lost_start, then)
+                    .button(R.string.gpu_lost_choose, () -> pickDriverThen(then));
+        } else {  // an installed driver hung: going back to the system driver comes first
+            String id = prefs.getString("gpu_driver", "");
+            d.message(getString(R.string.gpu_lost_custom, driver))
+                    .button(R.string.gpu_lost_start, () -> {
+                        GpuDrivers.clearProbe(this, id);  // another try with it
+                        then.run();
+                    })
+                    .button(R.string.gpu_lost_choose_other, () -> pickDriverThen(then))
+                    .button(R.string.gpu_lost_system_driver, () -> {
+                        GpuDrivers.clearProbe(this, id);
+                        prefs.edit().putString("gpu_driver", "").commit();
+                        then.run();
+                    });
+        }
+        d.show();
+        return true;
+    }
+
+    // the driver picker, and `then` once it is done without a restart (cancelled, failed, "Later")
+    private Runnable afterDriverPick;
+    private void pickDriverThen(Runnable then) {
+        afterDriverPick = then;
+        pickDriver();
+    }
+    private void driverPickDone() {
+        Runnable r = afterDriverPick;
+        afterDriverPick = null;
+        if (r != null) r.run();
     }
 
     // ------------------------------------------------------------------ GPU driver (Adreno)
@@ -479,8 +610,20 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         setenv("WWHD_GPU_DRIVER_LIB", d.library);
         // Turnip: always render in tiles (GMEM). Its automatic choice falls back to direct rendering for
         // many of the game's passes, which measured slower on an Adreno 740 (25 -> 28.5 fps in a heavy
-        // scene); a TU_DEBUG in wwhd.env wins
-        if (d.library.contains("freedreno") && Os.getenv("TU_DEBUG") == null) setenv("TU_DEBUG", "gmem");
+        // scene). On Adreno 6xx its own choice instead, and without UBWC compression: with it, Turnip (26.0 to 26.3) above 1x
+        // resolution restarted a Galaxy S20 FE (Adreno 650, kernel 4.19) at the first frame (a fatal
+        // bus error, TZBSP_ERR_FATAL_NOC_ERROR); without it 1.5x runs, and 1x is as fast (18.2 against
+        // 19.5 ms of GPU time per frame). A TU_DEBUG in wwhd.env wins
+        if (d.turnip() && Os.getenv("TU_DEBUG") == null) {
+            java.util.List<String> dbg = new java.util.ArrayList<>();
+            String gpu = GpuDrivers.gpuModel();
+            boolean a6xx = gpu.startsWith("Adreno6");
+            // (GMEM forced measured slower on the Adreno 650: 22.7 against 17.0 ms per frame)
+            if (d.library.contains("freedreno") && !a6xx) dbg.add("gmem");
+            if (a6xx) dbg.add("noubwc");
+            Log.i(TAG, "Turnip on " + (gpu.isEmpty() ? "an unknown GPU" : gpu) + ": TU_DEBUG=" + String.join(",", dbg));
+            if (!dbg.isEmpty()) setenv("TU_DEBUG", String.join(",", dbg));
+        }
         setenv("WWHD_GPU_HOOK_DIR", GpuDrivers.hookDir(this).getAbsolutePath() + "/");
         try {
             //noinspection ResultOfMethodCallIgnored
@@ -490,6 +633,13 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             Log.w(TAG, "cannot create " + probe, e);
         }
         return null;
+    }
+
+    // the user's choice: a fresh try for the driver, even if it failed at an earlier start (its .probe
+    // would otherwise send the next start straight back to the system driver)
+    void selectGpuDriver(String id) {
+        GpuDrivers.clearProbe(this, id);
+        prefs.edit().putString("gpu_driver", id).commit();
     }
 
     String gpuDriverLabel() {
@@ -505,7 +655,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         new GameDialog(this).title(R.string.opt_gpu_driver).message(getString(R.string.gpu_driver_switch, name))
                 .button(R.string.opt_cancel, null)
                 .button(R.string.res_restart_now, () -> {
-                    prefs.edit().putString("gpu_driver", id).commit();
+                    selectGpuDriver(id);
                     restartApp();
                 }).show();
     }
@@ -540,15 +690,15 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         withProgress(R.string.gpu_driver_installing, () -> GpuDrivers.install(this, uri), res -> {
             if (res.startsWith("!")) {
                 new GameDialog(this).title(R.string.opt_gpu_driver).message(getString(R.string.gpu_driver_install_failed, res.substring(1)))
-                        .button(R.string.opt_ok, null).show();
+                        .button(R.string.opt_ok, this::driverPickDone).show();
                 return;
             }
             GpuDrivers.Driver d = GpuDrivers.find(this, res);
             String name = d != null ? d.name + (d.version.isEmpty() ? "" : " (" + d.version + ")") : res;
             new GameDialog(this).title(R.string.opt_gpu_driver).message(getString(R.string.gpu_driver_installed, name))
-                    .button(R.string.gpu_driver_later, null)
+                    .button(R.string.gpu_driver_later, this::driverPickDone)
                     .button(R.string.gpu_driver_use_now, () -> {
-                        prefs.edit().putString("gpu_driver", res).commit();
+                        selectGpuDriver(res);
                         restartApp();
                     }).show();
         });
@@ -651,6 +801,54 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         hideSystemBars();
     }
 
+    // The shader cache's replay before the first frame (Native.cacheProgress; seconds with a large
+    // cache): the sea card with its progress over the game picture instead of a black screen. Shown
+    // only when there is a cache file and 300 ms have passed; gone once the replay is done.
+    private void showCacheLoading() {
+        if (surface == null || !(surface.getParent() instanceof FrameLayout)) return;
+        FrameLayout root = (FrameLayout) surface.getParent();
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (24 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad, pad, pad);
+        TextView t = new TextView(this);
+        t.setTextSize(16);
+        t.setText(R.string.cache_loading);
+        box.addView(t);
+        android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(1000);
+        box.addView(bar);
+        TextView detail = new TextView(this);
+        box.addView(detail);
+        View screen = seaScreen(box);
+        final SeaView mySea = sea;
+        sea = null;  // the game's screen: no work screen of its own
+        screen.setVisibility(View.GONE);
+        root.addView(screen, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        final long t0 = android.os.SystemClock.uptimeMillis();
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        h.post(new Runnable() {
+            @Override
+            public void run() {
+                long[] p = Native.cacheProgress();
+                if (p[0] == 2 || screen.getParent() != root) {  // done, or the game's screen was replaced
+                    root.removeView(screen);
+                    return;
+                }
+                // only while a cache file is replayed (state 1 with a size), not while the game boots
+                if (screen.getVisibility() != View.VISIBLE && p[0] == 1 && p[2] > 0
+                        && android.os.SystemClock.uptimeMillis() - t0 > 300)
+                    screen.setVisibility(View.VISIBLE);
+                if (p[2] > 0) {
+                    bar.setProgress((int) Math.min(1000, p[1] * 1000 / p[2]));
+                    mySea.setProgress(Math.min(1f, (float) p[1] / p[2]));
+                }
+                detail.setText(getString(R.string.cache_loading_detail, (int) p[3]));
+                h.postDelayed(this, 150);
+            }
+        });
+    }
+
     private void hideSystemBars() {
         WindowInsetsController c = getWindow().getInsetsController();
         if (c == null) return;
@@ -699,6 +897,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     private void applyOptions() {
         Native.setOption("ao_mode", prefs.getInt("ao_mode", Native.getOption("ao_mode")));
         Native.setOption("bloom_strength", prefs.getInt("bloom_strength", 100));
+        Native.setOption("area_blur", prefs.getBoolean("area_blur", false) ? 1 : 0);
         Native.setOption("ao_hires", prefs.getBoolean("ao_hires", Native.getOption("ao_hires") != 0) ? 1 : 0);
         Native.setOption("aniso", prefs.getBoolean("aniso", Native.getOption("aniso") != 0) ? 1 : 0);
         Native.setOption("distant_shadows", prefs.getBoolean("distant_shadows", true) ? 1 : 0);
@@ -711,6 +910,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         for (int p = 0; p < HUD_PARTS; p++) sendHud(p);
         for (String k : new String[] {"inf_health", "inf_magic", "inf_ammo"}) Native.setOption(k, prefs.getBoolean(k, false) ? 1 : 0);
         for (String m : MODS) Native.setOption(m, prefs.getBoolean(m, false) ? 1 : 0);
+        for (String c : new String[] {"cheat_moon_jump", "cheat_moon_nofall", "cheat_moon_anims"}) Native.setOption(c, prefs.getBoolean(c, false) ? 1 : 0);
+        Native.setOption("cheat_moon_rise", prefs.getInt("cheat_moon_rise", 100));
+        Native.setOption("cheat_moon_fly", prefs.getInt("cheat_moon_fly", 100));
         Native.setOption("mod_camera_speed", prefs.getInt("mod_camera_speed", 100));
         Native.setOption("mod_run_speed", prefs.getInt("mod_run_speed", 100));
         Native.setOption("mod_swim_speed", prefs.getInt("mod_swim_speed", 100));
@@ -844,6 +1046,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         controls.setPerfHud(prefs.getBoolean("perf_hud", false));
         controls.setPerfItems(prefs.getInt("perf_items", ControlsView.PERF_ALL));
         mapper.loadMap(prefs.getString("pad_map", ""));
+        controls.setButtonLabels(ButtonStyle.touchLabels(buttonStyle()));
         controls.perfSettings = this::perfSettingsLines;
         controls.setPerfPosition(prefs.getFloat("perf_x", -1), prefs.getFloat("perf_y", -1));
     }
@@ -1168,6 +1371,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     protected void onPause() {
         super.onPause();
         resumed = false;
+        if (rotationGuard != null) rotationGuard.onPause();
         ((android.hardware.input.InputManager) getSystemService(INPUT_SERVICE)).unregisterInputDeviceListener(deviceListener);
         updateDrcDisplay();
         if (started) Native.setPaused(true);
@@ -1182,6 +1386,8 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     protected void onResume() {
         super.onResume();
         resumed = true;
+        if (rotationGuard == null) rotationGuard = new RotationGuard(this, prefs);
+        rotationGuard.onResume();
         ((android.hardware.input.InputManager) getSystemService(INPUT_SERVICE)).registerInputDeviceListener(deviceListener, null);
         updateDrcDisplay();
         if (started) {
@@ -1314,6 +1520,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
                                    "mod_ff_cutscenes", "mod_ff_dialogues"};
     static final int[] CAMERA_SPEEDS = {50, 100, 150, 200};
     static final int[] RUN_SPEEDS = {100, 125, 150, 200, 250, 300, 400};  // 100: off
+    static final int[] MOON_RISE_SPEEDS = {50, 75, 100, 150, 200, 300};  // moon jump rise, percent
+    static final int[] MOON_FLY_SPEEDS = new int[20];  // moon jump flight, percent: 50..1000 in steps of 50
+    static { for (int i = 0; i < MOON_FLY_SPEEDS.length; i++) MOON_FLY_SPEEDS[i] = 50 * (i + 1); }
 
     // faster running ("mod_run") and swimming ("mod_swim") each apply always, or with L3: held, or
     // one press switches it on and off
@@ -1585,6 +1794,24 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
     private boolean frameGenOn() { return prefs.getBoolean("fg_enabled", false) && frameGenDll().exists(); }
 
+    // the display's highest refresh rate (at least 60)
+    int maxRefreshHz() {
+        float hz = 60;
+        for (android.view.Display.Mode m : getWindowManager().getDefaultDisplay().getSupportedModes())
+            hz = Math.max(hz, m.getRefreshRate());
+        return Math.round(hz);
+    }
+
+    // frames shown per second without frame generation (the Frame rate setting)
+    int shownFps() {
+        switch (prefs.getBoolean("fg_enabled", false) ? 0 : savedFpsMode()) {
+            case 1: case 2: case 3: case 5: return 60;
+            case 4: return 40;
+            case 6: return 120;
+            default: return 30;
+        }
+    }
+
     private void applyFrameGenSettings() {
         // the renderer generates frames only if the display can show them (also when switched on later)
         float hz = 60;
@@ -1644,18 +1871,29 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         frameGenChanged();
     }
 
-    /** 0: 30 fps, 1: 60 fps (frame interpolation), 2: adaptive 60 (30 while the device can't hold 60) */
-    /** 40 fps needs a panel that runs at 120 Hz (a frame every 3 refreshes) */
+    /** 40 and 120 fps need a panel that runs at 120 Hz (40 fps: a frame every 3 refreshes) */
     boolean has120Hz() {
         for (android.view.Display.Mode m : getWindowManager().getDefaultDisplay().getSupportedModes())
             if (Math.abs(m.getRefreshRate() - 120f) < 1.5f) return true;
         return false;
     }
 
-    /** the saved frame rate mode; 40 fps (4) falls back to 60 where the panel has no 120 Hz */
+    /**
+     * the saved frame rate mode (fps60.cpp): 0 30 fps, 1 60 fps (frame interpolation, paced), 3 true
+     * 60, 4 40 fps, 5 60 fps (generated), 6 120 fps; 2 (adaptive 60 of older versions) is 60 now, and
+     * 40/120 fps fall back to 60 where the panel has no 120 Hz
+     */
     int savedFpsMode() {
         int m = prefs.getInt("fps_mode", 0);
-        return m == 4 && !has120Hz() ? 1 : m;
+        return m == 2 || ((m == 4 || m == 6) && !has120Hz()) ? 1 : m;
+    }
+
+    String fpsModeName(int m) {
+        String[] names = getResources().getStringArray(R.array.fps_modes);
+        if (m == 4) return getString(R.string.fps_40);
+        if (m == 5) return getString(R.string.fps_generated);
+        if (m == 6) return getString(R.string.fps_120);
+        return names[Math.min(m, names.length - 1)];
     }
 
     void setFpsMode(int m) {
@@ -1875,8 +2113,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == PICK_DRIVER && result == RESULT_OK && data != null && data.getData() != null) {
-            installDriver(data.getData());
+        if (request == PICK_DRIVER) {
+            if (result == RESULT_OK && data != null && data.getData() != null) installDriver(data.getData());
+            else driverPickDone();  // cancelled: continue (the start after a GPU hang)
             return;
         }
         if (request == PICK_TRANSLATION && result == RESULT_OK && data != null && data.getData() != null) {

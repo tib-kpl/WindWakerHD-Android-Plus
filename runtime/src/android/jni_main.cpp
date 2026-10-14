@@ -19,6 +19,7 @@
 #include "../crash_info.h"
 #include "../gx2/gx2.h"
 #include "../input.h"
+#include "../interp.h"
 #include "../mods/climb.h"
 #include "../mods/mods.h"
 #include "../motion.h"
@@ -39,6 +40,8 @@ namespace gfx {
 int ao_mode();
 void set_ao_mode(int m);
 int bloom_strength();
+bool area_blur();
+void set_area_blur(bool on);
 void set_bloom_strength(int pct);
 bool aniso_enabled();
 void set_aniso(bool v);
@@ -195,6 +198,14 @@ JNI_FN(jstring, gpuDriverInfo)(JNIEnv* env, jclass) { return env->NewStringUTF(g
 // the GPU's name as Vulkan reports it ("" until the renderer has started)
 JNI_FN(jstring, gpuName)(JNIEnv* env, jclass) { return env->NewStringUTF(gfx::gpu_name()); }
 JNI_FN(jboolean, gpuDriverFellBack)(JNIEnv*, jclass) { return gfx::driver_fallback(); }
+JNI_FN(jlongArray, cacheProgress)(JNIEnv* env, jclass) {
+    uint64_t p[4];
+    gfx::cache_progress(p);
+    jlongArray a = env->NewLongArray(4);
+    jlong v[4] = {(jlong)p[0], (jlong)p[1], (jlong)p[2], (jlong)p[3]};
+    env->SetLongArrayRegion(a, 0, 4, v);
+    return a;
+}
 
 // ---- extracting the game from the user's disc image (runtime/src/disc), on a Java thread
 static std::atomic<uint64_t> g_extract_done{0}, g_extract_total{0};
@@ -270,6 +281,7 @@ JNI_FN(jbyteArray, parseKey)(JNIEnv* env, jclass, jbyteArray data) {
 #include <sys/sysinfo.h>
 
 #include "../recomp/compile.h"
+#include "../recomp/locals.h"
 extern "C" const char wwhd_ops_bc[], wwhd_ops_bc_end[], wwhd_hooks[], wwhd_hooks_end[];  // recomp_data.S
 
 #ifdef WWHD_DEVICE_RECOMP
@@ -317,8 +329,9 @@ static std::string compile_code(const std::string& gameDir, const std::string& o
     progress.join();
     struct rusage ru;
     getrusage(RUSAGE_SELF, &ru);
-    LOG("[recomp] %s: %zu functions, %zu modules, %zu instructions in %.1f s, peak memory %ld MB%s%s", ok ? "done" : "FAILED",
-        res.functions, res.modules, res.instructions, res.seconds, ru.ru_maxrss / 1024, ok ? "" : ": ", ok ? "" : err.c_str());
+    LOG("[recomp] %s: %zu functions, %zu modules, %zu instructions in %.1f s, peak memory %ld MB; registers in locals: %zu "
+        "functions, %zu kept in the struct (%s)%s%s", ok ? "done" : "FAILED", res.functions, res.modules, res.instructions, res.seconds,
+        ru.ru_maxrss / 1024, res.localized, res.localFallback, recomp::code_switches().c_str(), ok ? "" : ": ", ok ? "" : err.c_str());
     return ok ? "" : err.empty() ? "failed" : err;
 }
 #endif
@@ -465,6 +478,37 @@ JNI_FN(jint, extractUiTextures)(JNIEnv* env, jclass, jstring gameDir, jstring ou
     return ui_icons::extract(jstr(env, gameDir), jstr(env, outDir), req);
 }
 
+// the icon font's cells (ButtonStyle): {cell width, cell height as 4 bytes each, little-endian},
+// then RGBA8 per code; null if the font isn't the expected kind
+JNI_FN(jbyteArray, fontCells)(JNIEnv* env, jclass, jbyteArray font, jintArray codes) {
+    std::vector<uint8_t> f(env->GetArrayLength(font));
+    env->GetByteArrayRegion(font, 0, (jsize)f.size(), (jbyte*)f.data());
+    std::vector<jint> c(env->GetArrayLength(codes));
+    env->GetIntArrayRegion(codes, 0, (jsize)c.size(), c.data());
+    std::vector<uint16_t> cs(c.begin(), c.end());
+    std::vector<uint8_t> rgba;
+    uint32_t cw = 0, ch = 0;
+    if (!ui_icons::font_cells(f.data(), f.size(), cs, rgba, cw, ch)) return nullptr;
+    jbyteArray out = env->NewByteArray((jsize)(8 + rgba.size()));
+    uint32_t hdr[2] = {cw, ch};
+    env->SetByteArrayRegion(out, 0, 8, (const jbyte*)hdr);
+    env->SetByteArrayRegion(out, 8, (jsize)rgba.size(), (const jbyte*)rgba.data());
+    return out;
+}
+
+// writes cells (as fontCells returns them, without the header) into the font array, in place
+JNI_FN(jboolean, patchFontCells)(JNIEnv* env, jclass, jbyteArray font, jintArray codes, jbyteArray cells) {
+    std::vector<uint8_t> f(env->GetArrayLength(font)), r(env->GetArrayLength(cells));
+    env->GetByteArrayRegion(font, 0, (jsize)f.size(), (jbyte*)f.data());
+    env->GetByteArrayRegion(cells, 0, (jsize)r.size(), (jbyte*)r.data());
+    std::vector<jint> c(env->GetArrayLength(codes));
+    env->GetIntArrayRegion(codes, 0, (jsize)c.size(), c.data());
+    std::vector<uint16_t> cs(c.begin(), c.end());
+    if (!ui_icons::font_patch(f.data(), f.size(), cs, r.data(), r.size())) return JNI_FALSE;
+    env->SetByteArrayRegion(font, 0, (jsize)f.size(), (const jbyte*)f.data());
+    return JNI_TRUE;
+}
+
 // game state for the touch controls' icons (ControlsView)
 JNI_FN(jintArray, hudState)(JNIEnv* env, jclass) {
     int32_t s[touch_hud::kSize];
@@ -489,6 +533,7 @@ JNI_FN(void, setOption)(JNIEnv* env, jclass, jstring name, jint value) {
     if (n != "capture") crash_info::option(n, value);
     if (n == "ao_mode") gfx::set_ao_mode(value);
     else if (n == "bloom_strength") gfx::set_bloom_strength(value);
+    else if (n == "area_blur") gfx::set_area_blur(value != 0);
     else if (n == "ao_hires") gfx::set_ao_hires(value != 0);
     else if (n == "aniso") gfx::set_aniso(value != 0);
     else if (n == "distant_shadows") gfx::set_distant_shadows(value != 0);
@@ -530,12 +575,18 @@ JNI_FN(void, setOption)(JNIEnv* env, jclass, jstring name, jint value) {
     else if (n == "mod_run_mode") mods::set_run_mode(value);
     else if (n == "mod_swim_mode") mods::set_swim_mode(value);
     else if (n == "mod_swim_speed") mods::set_swim_speed(value / 100.0f);
+    else if (n == "cheat_moon_jump") mods::set_infinite(mods::kMoonJump, value != 0);
+    else if (n == "cheat_moon_nofall") mods::set_infinite(mods::kMoonNoFall, value != 0);
+    else if (n == "cheat_moon_anims") mods::set_infinite(mods::kMoonAllAnims, value != 0);
+    else if (n == "cheat_moon_rise") mods::set_moon_jump_speeds(value, mods::moon_jump_fly());
+    else if (n == "cheat_moon_fly") mods::set_moon_jump_speeds(mods::moon_jump_rise(), value);
 }
 
 JNI_FN(jint, getOption)(JNIEnv* env, jclass, jstring name) {
     std::string n = jstr(env, name);
     if (n == "ao_mode") return gfx::ao_mode();
     if (n == "bloom_strength") return gfx::bloom_strength();
+    if (n == "area_blur") return gfx::area_blur();
     if (n == "ao_hires") return gfx::ao_hires_enabled();
     if (n == "aniso") return gfx::aniso_enabled();
     if (n == "distant_shadows") return gfx::distant_shadows();
@@ -545,6 +596,7 @@ JNI_FN(jint, getOption)(JNIEnv* env, jclass, jstring name) {
     if (n == "fps_mode") return fps60::mode();
     if (n == "drawdone_mode") return gx2::drawdone_mode();
     if (n == "core_mode") return platform::core_mode();
+    if (n == "interp_fps") return interp::mode() == 1 ? interp::fps() : 0;
     if (n == "mod_direct_camera") return mods::direct_camera();
     if (n == "mod_camera_speed") return (int)lroundf(mods::camera_speed() * 100);
     if (n == "mod_first_person") return mods::first_person_wheel();
@@ -557,6 +609,11 @@ JNI_FN(jint, getOption)(JNIEnv* env, jclass, jstring name) {
     if (n == "mod_run_mode") return mods::run_mode();
     if (n == "mod_swim_mode") return mods::swim_mode();
     if (n == "mod_swim_speed") return (int)lroundf(mods::swim_speed() * 100);
+    if (n == "cheat_moon_jump") return mods::infinite(mods::kMoonJump);
+    if (n == "cheat_moon_nofall") return mods::infinite(mods::kMoonNoFall);
+    if (n == "cheat_moon_anims") return mods::infinite(mods::kMoonAllAnims);
+    if (n == "cheat_moon_rise") return mods::moon_jump_rise();
+    if (n == "cheat_moon_fly") return mods::moon_jump_fly();
     return 0;
 }
 

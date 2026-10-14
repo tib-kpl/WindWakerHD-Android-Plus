@@ -130,12 +130,21 @@ static void crash_handler(int sig, siginfo_t* si, void* uctx) {
     crash_log_open();
     char buf[512];
     int n;
-    if (a >= base && a < base + 0x100000000ull)
+    if (sig == SIGABRT)  // si_addr means nothing here
+        n = snprintf(buf, sizeof buf, "\nCRASH: signal %d (abort)\n", sig);
+    else if (a >= base && a < base + 0x100000000ull)
         n = snprintf(buf, sizeof buf, "\nCRASH: signal %d at guest address %08X\n", sig, (unsigned)(a - base));
     else
         n = snprintf(buf, sizeof buf, "\nCRASH: signal %d at host address %p\n", sig, si->si_addr);
     crash_write(buf, n);
     crash_log_details();
+    {
+        char pn[200];
+        int k = platform::process_numbers(pn, sizeof pn);
+        crash_write("  process: ", 11);
+        crash_write(pn, k);
+        crash_write("\n", 1);
+    }
     // the faulting instruction and the module holding it (a GPU driver, a Vulkan layer, the game code)
     uintptr_t pc = 0;
 #if defined(__aarch64__)
@@ -155,7 +164,7 @@ static void crash_handler(int sig, siginfo_t* si, void* uctx) {
             gpu_crash_marker(where);
         }
     }
-    if (!(a >= base && a < base + 0x100000000ull) && describe_host(where, sizeof where, a)) {
+    if (sig != SIGABRT && !(a >= base && a < base + 0x100000000ull) && describe_host(where, sizeof where, a)) {
         n = snprintf(buf, sizeof buf, "  fault address %p%s\n", si->si_addr, where);
         crash_write(buf, std::min<int>(n, sizeof buf - 1));
     }
@@ -167,6 +176,28 @@ static void crash_handler(int sig, siginfo_t* si, void* uctx) {
             n = snprintf(buf, sizeof buf, "  r%-2d %08X %08X %08X %08X %08X %08X %08X %08X\n", i, c->r[i], c->r[i + 1],
                          c->r[i + 2], c->r[i + 3], c->r[i + 4], c->r[i + 5], c->r[i + 6], c->r[i + 7]);
             crash_write(buf, n);
+        }
+        // guest memory at registers that point into game data (heaps, objects, the stack): 128 bytes
+        // each, so a crash in game code shows the state it read (e.g. a heap that ran out). The whole
+        // guest address space is mapped readable (core.cpp), so these reads can't fault.
+        uint32_t dumped[12];
+        int nd = 0;
+        for (int i = 0; i < 32 && nd < 12; i++) {
+            if (i == 2 || i == 13) continue;  // the game's constant and small-data areas: always the same
+            uint32_t v = c->r[i] & ~3u;
+            if (v < 0x10000000u || v >= 0x80000000u) continue;
+            bool seen = false;
+            for (int k = 0; k < nd; k++) seen |= dumped[k] == v;
+            if (seen) continue;
+            dumped[nd++] = v;
+            n = snprintf(buf, sizeof buf, "  memory at r%d (%08X):\n", i, v);
+            crash_write(buf, n);
+            for (uint32_t o = 0; o < 128; o += 32) {
+                n = snprintf(buf, sizeof buf, "    +%02X %08X %08X %08X %08X %08X %08X %08X %08X\n", o, ld32(v + o),
+                             ld32(v + o + 4), ld32(v + o + 8), ld32(v + o + 12), ld32(v + o + 16), ld32(v + o + 20),
+                             ld32(v + o + 24), ld32(v + o + 28));
+                crash_write(buf, n);
+            }
         }
         // guest return chain (back-chain words on the guest stack)
         crash_write("  guest call chain:", 19);
@@ -213,7 +244,9 @@ static void install_crash_handler() {
     struct sigaction sa{};
     sa.sa_sigaction = crash_handler;
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
-    for (int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE}) sigaction(sig, &sa, &g_prev_action[sig]);
+    // SIGABRT too: aborts in a GPU driver (issue #30) or fatal() get a log of their own (then the previous
+    // handler, debuggerd, as for the others)
+    for (int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT}) sigaction(sig, &sa, &g_prev_action[sig]);
 }
 
 static void init_data_imports() {

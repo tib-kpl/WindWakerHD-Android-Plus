@@ -34,12 +34,26 @@ final class GpuDrivers {
     private GpuDrivers() {}
 
     static final class Driver {
-        String id, name, version, description, library;
+        String id, name, version, description, library, vendor;
+
+        /** a Turnip (Mesa) build, by the package's vendor or the usual library and package names */
+        boolean turnip() {
+            return library.contains("freedreno") || vendor.equalsIgnoreCase("mesa") || name.toLowerCase(java.util.Locale.ROOT).contains("turnip");
+        }
         File dir;
     }
 
     /** Custom drivers only work on Adreno GPUs (the kernel's kgsl device). */
     static boolean supported() { return new File("/dev/kgsl-3d0").exists(); }
+
+    /** The GPU's model as the kernel names it ("Adreno650v3"), or "" if it can't be read. */
+    static String gpuModel() {
+        try {
+            return new String(Files.readAllBytes(new File("/sys/class/kgsl/kgsl-3d0/gpu_model").toPath()), StandardCharsets.UTF_8).trim();
+        } catch (IOException | RuntimeException e) {
+            return "";
+        }
+    }
 
     static File root(Context c) { return new File(c.getFilesDir(), "gpu_drivers"); }
 
@@ -72,6 +86,7 @@ final class GpuDrivers {
             d.name = m.optString("name", d.library);
             d.version = m.optString("driverVersion", m.optString("packageVersion", ""));
             d.description = m.optString("description", "");
+            d.vendor = m.optString("vendor", "");
             return new File(dir, d.library).exists() ? d : null;
         } catch (IOException | JSONException e) {
             return null;
@@ -119,6 +134,13 @@ final class GpuDrivers {
             throw new IOException("cannot move " + tmp);
         }
         return id;
+    }
+
+    /** Forgets that `id` failed at an earlier start (its .probe), for a new try. */
+    static void clearProbe(Context c, String id) {
+        if (id == null || id.isEmpty()) return;
+        //noinspection ResultOfMethodCallIgnored
+        new File(new File(root(c), id), ".probe").delete();
     }
 
     static void remove(Context c, String id) {

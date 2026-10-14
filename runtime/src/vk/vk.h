@@ -18,9 +18,15 @@
 
 namespace gfx {
 
+// the GPU driver lost the device (it hung or crashed): leaves a note for the app's next start, which
+// offers to load another GPU driver (vk_device.cpp)
+void vk_note_device_lost();
+// vkCreateGraphicsPipelines with the pipeline cache, one at a time where the driver needs it (vk_device.cpp)
+VkResult create_graphics_pipeline(const VkGraphicsPipelineCreateInfo* ci, VkPipeline* out);
 #define VK_CHECK(x)                                                                     \
     do {                                                                                \
         VkResult r_ = (x);                                                              \
+        if (r_ == VK_ERROR_DEVICE_LOST) ::gfx::vk_note_device_lost();                   \
         if (r_ != VK_SUCCESS) fatal("%s failed: VkResult %d (%s:%d)", #x, (int)r_, __FILE__, __LINE__); \
     } while (0)
 
@@ -57,6 +63,7 @@ struct Surface {
     uint64_t contentHash = 0;  // hash of guest data at last upload
     uint64_t lastCheckedFrame = ~0ull;
     uint64_t sparseHash = 0;   // cheap per-frame change check (a few hundred samples)
+    uint32_t checkGen = 0;     // write tracking (mem_writes.h) when the contents were last compared
     uint32_t dataSize = 0;     // base level size in guest memory
     bool dirty = true;         // new, or invalidated by the game: do a full check
     FormatInfo fmt;
@@ -109,6 +116,9 @@ struct Renderer {
     bool shaderFloat16 = false;  // 16-bit float arithmetic in shaders (frame generation)
     VkPipelineCache pipelineCache = VK_NULL_HANDLE;
     std::mutex queueMutex;  // vkQueueSubmit/Present from the render thread, waits from the UI thread
+    // vkAcquireNextImageKHR (render thread) and vkQueuePresentKHR (record thread) on the same swapchain
+    // need external synchronization; taken before queueMutex
+    std::mutex swapchainMutex;
 
     VkCommandPool cmdPool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;  // recording, or null
