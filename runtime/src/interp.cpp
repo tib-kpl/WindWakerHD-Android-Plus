@@ -39,6 +39,7 @@
 #include "interp_pacing.h"
 #include "guest_addr.h"
 #include <ctime>
+#include "platform.h"
 #include "runtime.h"
 #include "savestate.h"
 #include "true60.h"
@@ -926,8 +927,11 @@ static void paced_pass_start() {
     }
     g_step_drew = false;
     // a step: two virtual vsyncs (the game's swap interval), on the clock the flips follow (it is
-    // locked to the display): a fixed 33.333 ms drifted against it (ZeldaWWHDRecomp, issue #164)
-    const auto step = std::chrono::nanoseconds(2 * paced_vsync_ns());
+    // locked to the display): a fixed 33.333 ms drifted against it (ZeldaWWHDRecomp, issue #164).
+    // At 120/240 fps that clock runs 2/4 times as fast (gx2_display_vsync): two of its vsyncs were
+    // 16.7 / 8.3 ms, so whenever in-between frames were left out the logic passes followed each other
+    // that fast and the game ran up to twice (four times) its speed. Two vsyncs at the game's rate.
+    const auto step = std::chrono::nanoseconds(2 * paced_vsync_ns() * std::max(1, vsync_rate()));
     if (g_wait_step && now < g_last_logic + step) {
         const auto due = g_last_logic + step;
         threads::park_sleep_until(due);  // the game keeps 30 steps a second
@@ -1045,7 +1049,8 @@ namespace mods { void cheats_service(); }  // mods/cheats.cpp
 static std::atomic<bool> g_menu_open{false};
 static uint64_t g_play_draw_step = 0;
 namespace interp {
-// the hybrid layout shows the GamePad: a game menu is open (dMenu_flag), or no game is being played
+// the hybrid layout shows the GamePad: a game menu is open (dMenu_flag), the Wind Waker's songs are up,
+// or no game is being played
 // (title, file select: the play scene's world step, true60.cpp site_025B00B0, has not run for 15 steps)
 bool menu_open() { return g_menu_open.load(std::memory_order_relaxed); }
 void note_play_draw() { g_play_draw_step = g_logic_steps; }
@@ -1054,10 +1059,15 @@ static void menu30_update() {
     using namespace interp;
     static uint64_t until = 0;
     const bool menu = ld8(GD(0x101EA069)) != 0;  // dMenu_flag (025986BC)
-    const bool gamepad = menu || g_logic_steps > g_play_draw_step + 15;
+    // the Wind Waker's song screen (issue #14): it is no dMenu, it lives on the GamePad while Link
+    // holds the baton, daPy_lk_c::mCurProc (+0x65F0) TACT_WAIT 0x9A .. TACT_PLAY_ORIGINAL 0x9D
+    const uint32_t link = true60::link();
+    const uint32_t proc = link >= 0x10000000u && link < 0x50000000u ? ld32(link + 0x65F0) : 0;
+    const bool baton = proc >= 0x9A && proc <= 0x9D;
+    const bool gamepad = menu || baton || g_logic_steps > g_play_draw_step + 15;
     if (gamepad != g_menu_open.load(std::memory_order_relaxed)) {
         g_menu_open.store(gamepad, std::memory_order_relaxed);
-        LOG("[interp] %s", gamepad ? (menu ? "menu open" : "no game in play") : "game in play");
+        LOG("[interp] %s", gamepad ? (menu ? "menu open" : baton ? "Wind Waker songs" : "no game in play") : "game in play");
     }
     bool on = false;
     if (g_mode40.load(std::memory_order_relaxed) && interp_on()) {
@@ -1116,6 +1126,7 @@ std::string pass_cpu_report() {
 
 extern "C" void hook_0203593C(Cpu* c) {
     using namespace interp;
+    platform::wait_while_game_paused();  // the app in the background: nothing runs or draws until it's back
     fx_pass_start();
     ss::service(c);  // save states: exact values are back in guest memory, all other threads idle
     mods::cheats_service();

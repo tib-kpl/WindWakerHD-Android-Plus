@@ -53,6 +53,7 @@
         <item>Système</item>
         <item>English</item>
         <item>Português (Brasil)</item>
+        <item>Español</item>
         <item>Français</item>
     </string-array>
     <string name="pad_face_bottom">Bouton du bas (A / Croix)</string>

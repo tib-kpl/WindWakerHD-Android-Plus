@@ -35,6 +35,8 @@ final class AutoBackup {
 
     /** Copies what changed; safe to call often (runs on a background thread). */
     static void runAsync(Context context, File base, SharedPreferences prefs) {
+        // a test build installed beside the app (-PwwhdTestId) never writes over the app's backup
+        if (context.getPackageName().endsWith(".test")) return;
         final Context app = context.getApplicationContext();
         new Thread(() -> {
             synchronized (LOCK) {
@@ -119,7 +121,7 @@ final class AutoBackup {
         }
     }
 
-    private static String sha1(File f) throws IOException {
+    static String sha1(File f) throws IOException {
         try (InputStream in = new FileInputStream(f)) {
             java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
             byte[] buf = new byte[1 << 16];

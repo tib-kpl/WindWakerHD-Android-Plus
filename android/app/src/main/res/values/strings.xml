@@ -24,7 +24,7 @@
     <string name="ptbr_about">Plays the game with the Brazilian Portuguese fan translation by Triforce-Heroes (triforce-heroes.com.br). The translation replaces the English text, so turning it on sets the game language to English. If it isn\'t installed, choose its folder (the Cemu version or the console version, the folder with rules.txt).</string>
     <string name="ptbr_install">Install the translation…</string>
     <string name="ptbr_install_hint">Choose the translation\'s folder</string>
-    <string name="ptbr_install_other">Install another version…</string>
+    <string name="ptbr_install_other">Install another translation (any language)…</string>
     <string name="ptbr_installed">Installed: %1$s</string>
     <string name="ptbr_toggle_hint">Applies after a restart</string>
     <string name="ptbr_remove">Remove the translation</string>
@@ -55,6 +55,7 @@
         <item>System</item>
         <item>English</item>
         <item>Português (Brasil)</item>
+        <item>Español</item>
         <item>Français</item>
     </string-array>
     <string name="pad_face_bottom">Bottom face button (A / Cross)</string>
@@ -207,6 +208,16 @@
     <string name="opt_import_hint">Restore them from a folder; an imported game save restarts the game</string>
     <string name="opt_auto_backup">Automatic save backup</string>
     <string name="opt_auto_backup_hint">Keeps a copy of your game save in Downloads/WindWakerHD Saves, which survives uninstalling the app</string>
+    <string name="opt_autosave">Autosave</string>
+    <string name="opt_autosave_hint">Saves a snapshot into the Auto slot at this interval while you play</string>
+    <string-array name="autosave_intervals">
+        <item>Off</item>
+        <item>Every 1 min</item>
+        <item>Every 2 min</item>
+        <item>Every 5 min</item>
+        <item>Every 10 min</item>
+    </string-array>
+    <string name="opt_slot_auto">Auto (autosave)</string>
     <string name="restore_title">Restore your game save?</string>
     <string name="restore_message">There is no game save yet. If you played before (an earlier version of the app, or a backup), pick the folder that holds it: the \"%1$s\" folder in Downloads has the automatic backups, or pick a folder you exported to. You can also do this later in Options > Saves > Import saves.</string>
     <string name="restore_new_game">New game</string>
@@ -219,7 +230,7 @@
     <string name="opt_cancel">Cancel</string>
     <string name="opt_on">ON</string>
     <string name="opt_off">OFF</string>
-    <string name="opt_pad_hint">Controller: hold Select or press Home to open and close · L / R switch tabs · D-pad moves and changes values · right button selects · bottom button goes back</string>
+    <string name="opt_pad_hint">Controller: Select + Start, hold Select or press Home to open and close · L / R switch tabs · D-pad moves and changes values · right button selects · bottom button goes back</string>
     <string name="lang_restart">The new language takes effect when the game restarts. Progress since your last save is lost.</string>
     <string name="opt_fps">Frame rate</string>
     <string name="opt_fps_hint">60 fps (generated): the game runs at its own 30 and every other frame is made on the GPU from the last one (smooth on most phones; the HUD and the screen edges may show small artifacts). 60 and 120 fps interpolate frames on the CPU and need a fast phone; where a frame doesn\'t fit in time it is left out and the game keeps its speed</string>
@@ -362,6 +373,13 @@
     <string name="interp_fps">%d fps (interpolated)</string>
     <string name="cache_loading">Loading the shader cache…</string>
     <string name="cache_loading_detail">%1$,d shader variants prepared</string>
+    <string name="cache_building">Preparing every shader before the game starts…</string>
+    <string name="cache_building_detail">%1$,d of %2$,d pipelines</string>
+    <string name="opt_dynamic_res">Dynamic resolution</string>
+    <string name="opt_dynamic_res_hint">Lowers the 3D resolution while the GPU can\'t keep up (to 0.6x, so weak phones keep their frame rate) or the phone is hot (to 1x), and raises it back when there is room again</string>
+    <string name="dynamic_res_now">Now: %1$sx (GPU load or temperature)</string>
+    <string name="opt_shaders_at_start">Prepare all shaders at start</string>
+    <string name="opt_shaders_at_start_hint">Builds every shader the game has used behind the loading screen: no stutters while playing, a longer load. Takes effect at the next start</string>
     <string name="cheat_moon_jump">Moon jump</string>
     <string name="cheat_moon_jump_hint">Hold L (left shoulder button) to rise, steer with the left stick</string>
     <string name="cheat_moon_rise">Moon jump: rise speed</string>
@@ -477,5 +495,34 @@
         <item>Centre fix</item>
         <item>Centre + noise fix</item>
         <item>Off</item>
+    </string-array>
+    <!-- SaveVault: saves kept outside the app -->
+    <string name="vault_title">Keep your saves safe</string>
+    <string name="vault_message">Allow \"All files access\" and the app keeps a copy of your game save, your save states and your settings in the \"%1$s\" folder on your phone. It stays there when the app is uninstalled or updated, and a new install brings everything back by itself.</string>
+    <string name="vault_message_new">There is no game save yet. If you played before, allow \"All files access\" and the app brings back your game save, save states and settings from the \"%1$s\" folder (or from the automatic backups in Downloads) by itself, and keeps them there from now on, so an update never loses them.</string>
+    <string name="vault_later">Not now</string>
+    <string name="vault_allow">Allow</string>
+    <string name="vault_on_toast">Your saves are now kept in the \"%1$s\" folder too</string>
+    <string name="vault_restored_title">Your saves are back</string>
+    <string name="vault_restoring">Bringing your saves back…</string>
+    <string name="vault_part_save">your game save</string>
+    <string name="vault_part_settings">your settings</string>
+    <string name="vault_restored">Brought back from \"%2$s\": %1$s.</string>
+    <string name="vault_restart">The settings take effect after a restart.</string>
+    <string name="opt_vault">Saves outside the app</string>
+    <string name="opt_vault_hint">Off: allow \"All files access\" to keep a copy in the \"%1$s\" folder that survives updates and reinstalls</string>
+    <string name="opt_vault_hint_on">Your game save, save states and settings are copied to the \"%1$s\" folder as they change; a new install brings them back by itself</string>
+    <string name="vault_about_on">Your game save, save states and settings are copied to the \"%1$s\" folder on your phone as they change. After uninstalling or updating the app, the new install brings them back by itself when it starts without a game save. Don\'t delete that folder.</string>
+    <string name="language_ptbr">Português (Brasil)</string>
+    <plurals name="vault_part_states">
+        <item quantity="one">%d save state</item>
+        <item quantity="other">%d save states</item>
+    </plurals>
+    <!-- light graphics -->
+    <string name="opt_light">Graphics</string>
+    <string name="opt_light_hint">Light: for weaker GPUs. No ambient occlusion and no distant shadows</string>
+    <string-array name="light_modes">
+        <item>Quality</item>
+        <item>Light</item>
     </string-array>
 </resources>

@@ -228,11 +228,22 @@ constexpr uint32_t kPaneFlags = 0x44, kPaneMtxDirty = 0x10, kPaneGlobal = 0x48;
 constexpr uint32_t kPaneParent = 0x0C, kPaneChildren = 0x14, kPaneTrans = 0x1C, kPaneScale = 0x34, kPaneSize = 0x3C, kPaneName = 0x80;
 
 std::mutex g_root_mu;
-std::vector<std::pair<uint32_t, bool>> g_root_tv;  // layout root pane -> last drawn to the TV
+// layout root pane -> the swaps it was last drawn at to the TV and to the GamePad. A root drawn to
+// both (the controller select and file select screens, menus in the hybrid layout) shares one set
+// of matrices for both pictures: it is laid out as a GamePad layout (unanchored; its TV draws are
+// still centred by the projection) for as long as it keeps being drawn there. Deciding by the last
+// screen it was drawn to made the choice race the render thread: the game thread computing the
+// matrices between the TV draw and the GamePad draw stretched the screen-wide background over the
+// wider picture for that frame, and the screen's edges flickered.
+struct RootScreens {
+    uint32_t root;
+    uint64_t tv, drc;  // g_swaps + 1 of the last draw there (0: never)
+};
+std::vector<RootScreens> g_root_tv;
 bool root_on_tv(uint32_t root) {
     std::lock_guard<std::mutex> lk(g_root_mu);
-    for (auto& [r, tv] : g_root_tv)
-        if (r == root) return tv;
+    for (auto& e : g_root_tv)
+        if (e.root == root) return !e.drc || g_swaps + 1 - e.drc > 30;
     return true;  // not reported (yet): layouts are TV layouts unless seen on the GamePad
 }
 // the swap each layout root was last drawn at (any screen): layouts the game keeps but doesn't draw
@@ -252,9 +263,12 @@ void set_root_tv(uint32_t root, bool tv) {
     mark_drawn(root);
     std::lock_guard<std::mutex> lk(g_root_mu);
     for (auto& e : g_root_tv)
-        if (e.first == root) { e.second = tv; return; }
+        if (e.root == root) {
+            (tv ? e.tv : e.drc) = g_swaps + 1;
+            return;
+        }
     if (g_root_tv.size() > 256) g_root_tv.erase(g_root_tv.begin());
-    g_root_tv.push_back({root, tv});
+    g_root_tv.push_back({root, tv ? g_swaps + 1 : 0, tv ? 0 : g_swaps + 1});
 }
 
 // the anchoring state each root's matrices were last computed with: a root whose state changes
@@ -525,11 +539,20 @@ static void calc_mtx(Cpu* c) {
             if (ty >= 200.0f) ny = ty + halfY;
         }
     }
-    // a leaf covering the whole screen (background, fade): stretch it to the new shape
+    // a leaf covering the whole screen (background, fade): made to cover the new shape. One of the
+    // screen's shape is stretched to it; another shape (the telescope's and the first-person items'
+    // round view, W_Wipe_00: 1716x1716) keeps its proportions, scaled evenly just enough to cover
+    // (it usually covers the wider screen already): stretched, the round view became an ellipse
     uint32_t sentinel = pane + kPaneChildren;
     if (ld32(sentinel) == sentinel && std::fabs(tx) < 8.0f && std::fabs(ty) < 8.0f) {
         float w = (float)ldf32(pane + kPaneSize) * std::fabs(sx), h = (float)ldf32(pane + kPaneSize + 4) * std::fabs(sy);
-        if (w >= 1270.0f && h >= 710.0f) {
+        const bool screenShaped = h > 0.0f && std::fabs(w / h / (16.0f / 9.0f) - 1.0f) < 0.05f;
+        const float needX = 1280.0f * kx / std::max(w, 1.0f), needY = 720.0f * ky / std::max(h, 1.0f);
+        if (w >= 1270.0f && h >= 710.0f && !screenShaped) {
+            const float k = std::max(1.0f, std::max(needX, needY));
+            nsx = sx * k;
+            nsy = sy * k;
+        } else if (w >= 1270.0f && h >= 710.0f) {
             nsx = sx * kx;
             nsy = sy * ky;
             static const bool log_st = getenv("WWHD_ASPECT_LOG") != nullptr;

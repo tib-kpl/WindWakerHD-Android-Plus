@@ -462,6 +462,7 @@ JNI_FN(void, textInputDone)(JNIEnv* env, jclass, jboolean ok, jstring text) {
 
 JNI_FN(void, setPaused)(JNIEnv*, jclass, jboolean paused) {
     audio::set_paused(paused);
+    platform::set_game_paused(paused);
     if (paused && g_started) gfx::save_caches();
 }
 
@@ -580,6 +581,9 @@ JNI_FN(void, setOption)(JNIEnv* env, jclass, jstring name, jint value) {
     else if (n == "cheat_moon_anims") mods::set_infinite(mods::kMoonAllAnims, value != 0);
     else if (n == "cheat_moon_rise") mods::set_moon_jump_speeds(value, mods::moon_jump_fly());
     else if (n == "cheat_moon_fly") mods::set_moon_jump_speeds(mods::moon_jump_rise(), value);
+    // autosave (savestate.cpp): seconds between automatic snapshots into the "Auto" slot (0 = off)
+    else if (n == "autosave_secs") ss::set_autosave_seconds(value);
+    else if (n == "autosave_now") ss::autosave_now();
 }
 
 JNI_FN(jint, getOption)(JNIEnv* env, jclass, jstring name) {
@@ -614,6 +618,9 @@ JNI_FN(jint, getOption)(JNIEnv* env, jclass, jstring name) {
     if (n == "cheat_moon_anims") return mods::infinite(mods::kMoonAllAnims);
     if (n == "cheat_moon_rise") return mods::moon_jump_rise();
     if (n == "cheat_moon_fly") return mods::moon_jump_fly();
+    if (n == "autosave_secs") return ss::autosave_seconds();
+    if (n == "res_scale") return (int)lroundf(gfx::resolution_scale() * 100);  // in use (WWHD_RES_SCALE may differ from the setting)
+    if (n == "autosave_busy") return ss::autosave_busy() ? 1 : 0;
     return 0;
 }
 

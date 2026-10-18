@@ -67,7 +67,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     private int surfaceW, surfaceH;
 
     // the app's own language (Game › App language): 0 the system's, 1 English, 2 Portuguese (Brazil)
-    static final String[] APP_LOCALES = {"", "en", "pt-BR", "fr"};
+    static final String[] APP_LOCALES = {"", "en", "pt-BR", "es", "fr"};
 
     static Context withAppLanguage(Context base) {
         int l = base.getSharedPreferences(PREFS, MODE_PRIVATE).getInt("app_language", 0);
@@ -109,6 +109,8 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             setenv("WWHD_LANGUAGE", gameLanguage());
             applyFrameGenSettings();
             setenv("WWHD_APP_VERSION", CrashLogs.appVersion(this));  // the crash log's name
+            // every cached shader and pipeline built behind the loading screen (on by default)
+            setenv("WWHD_SHADERS_AT_START", prefs.getBoolean("shaders_at_start", true) ? "1" : "0");
             // command recording thread: automatic (the renderer decides), on or off (wwhd.env still wins)
             int recordThread = prefs.getInt("record_thread", 0);
             if (recordThread != 0) setenv("WWHD_RECORD_THREAD", recordThread == 1 ? "1" : "0");
@@ -461,6 +463,11 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             gpuLostOffered = true;
             if (offerGpuDriverAfterLoss(this::checkAndStart)) return;
         }
+        // the saves kept outside the app (SaveVault): asked for once, brought back on a new install
+        if (!vaultChecked) {
+            vaultChecked = true;
+            if (vaultAtStart()) return;
+        }
         File base = baseDir();
         if (!new File(base, "save/user/cking.sav").exists()) AutoBackup.startedWithoutSave(prefs);
         autoBackup();  // what the last run saved (it may have ended without a pause)
@@ -483,13 +490,16 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         Native.start(gameDir(), new File(base, "save").getAbsolutePath(),
                 new File(getNoBackupFilesDir(), "shadercache").getAbsolutePath(), base.getAbsolutePath());
         started = true;
+        backupHandler.postDelayed(periodicBackup, 120_000);
         applyOptions();
+        startThermal();
         startMotion();
         showGame();
         showCacheLoading();
         updateDrcDisplay();
         checkControllerConnected();
         showGpuCrashNotice();
+        backupHandler.postDelayed(this::lightGraphicsForWeakGpu, 8000);
         if (failedDriver != null)
             new GameDialog(this).title(R.string.opt_gpu_driver).message(getString(R.string.gpu_driver_failed, failedDriver))
                     .button(R.string.opt_ok, null).show();
@@ -500,6 +510,95 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     /** Copies the game save to Downloads/WindWakerHD Saves (AutoBackup), unless turned off. */
     void autoBackup() {
         if (prefs.getBoolean("auto_backup", true)) AutoBackup.runAsync(this, baseDir(), prefs);
+        SaveVault.syncAsync(this, baseDir(), prefs);
+    }
+
+    // while playing, the game's own saves and the autosave's states are copied out every two minutes
+    private final Runnable periodicBackup = new Runnable() {
+        @Override
+        public void run() {
+            if (!started || !resumed) return;
+            autoBackup();
+            backupHandler.postDelayed(this, 120_000);
+        }
+    };
+    private final android.os.Handler backupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    // ------------------------------------------------------------------ saves outside the app (SaveVault)
+    static final int PICK_VAULT = 9;
+    private boolean vaultChecked;  // this process asked (or brought the saves back) already
+
+    /** Before the game starts. Returns whether it continues the start itself (checkAndStart again). */
+    private boolean vaultAtStart() {
+        if (debuggable() && Os.getenv("WWHD_TEST_WARP") != null) return false;
+        boolean noSave = !new File(baseDir(), "save/user/cking.sav").exists();
+        if (SaveVault.enabled(this)) {
+            // once per install: what came back (settings alone, say) isn't taken again at the next start
+            if (!noSave || prefs.getBoolean("vault_restored", false) || !SaveVault.hasSomething()) return false;
+            restoreFromVault();
+            return true;
+        }
+        if (prefs.getBoolean("vault_asked", false)) return false;
+        prefs.edit().putBoolean("vault_asked", true).apply();
+        new GameDialog(this).title(R.string.vault_title)
+                .message(getString(noSave ? R.string.vault_message_new : R.string.vault_message, SaveVault.FOLDER)).cancelable(false)
+                .button(R.string.vault_later, this::checkAndStart)
+                .button(R.string.vault_allow, () -> requestVault(true)).show();
+        return true;
+    }
+
+    /** Android's "All files access" page; `atStart`: the start goes on when the player comes back */
+    void requestVault(boolean atStart) {
+        if (atStart) vaultChecked = false;
+        try {
+            startActivityForResult(SaveVault.permissionIntent(this), PICK_VAULT);
+        } catch (android.content.ActivityNotFoundException e) {
+            Log.w(TAG, "no all files access page", e);
+            if (atStart) checkAndStart();
+        }
+    }
+
+    private void vaultResult() {
+        if (!started) {
+            checkAndStart();
+            return;
+        }
+        if (!SaveVault.enabled(this)) return;
+        autoBackup();
+        android.widget.Toast.makeText(this, getString(R.string.vault_on_toast, SaveVault.FOLDER), android.widget.Toast.LENGTH_LONG).show();
+    }
+
+    private void restoreFromVault() {
+        final SaveVault.Restored[] got = {null};
+        withProgress(R.string.vault_restoring, () -> {
+            got[0] = SaveVault.restore(baseDir(), prefs);
+            return "";
+        }, r -> {
+            if (r != null && r.startsWith("!")) {
+                info(getString(R.string.backup_failed, r.substring(1)));
+                checkAndStart();
+                return;
+            }
+            SaveVault.Restored g = got[0];
+            // the save that came back is a real one (AutoBackup.startedWithoutSave); no offer to pick a folder
+            prefs.edit().remove("backup_fresh").putBoolean("restore_offered", true).putBoolean("vault_restored", true).commit();
+            List<String> parts = new ArrayList<>();
+            if (g.save) parts.add(getString(R.string.vault_part_save));
+            if (g.states > 0) parts.add(getResources().getQuantityString(R.plurals.vault_part_states, g.states, g.states));
+            if (g.settings) parts.add(getString(R.string.vault_part_settings));
+            if (parts.isEmpty()) {
+                checkAndStart();
+                return;
+            }
+            String msg = getString(R.string.vault_restored, android.text.TextUtils.join(", ", parts), SaveVault.FOLDER);
+            // the settings are read as the game starts (some before the library loads): a fresh start
+            if (g.settings)
+                new GameDialog(this).title(R.string.vault_restored_title).message(msg + "\n\n" + getString(R.string.vault_restart)).cancelable(false)
+                        .button(R.string.res_restart_now, this::restartApp).show();
+            else
+                new GameDialog(this).title(R.string.vault_restored_title).message(msg).cancelable(false)
+                        .button(R.string.opt_ok, this::checkAndStart).show();
+        });
     }
 
     // No game save yet (a new install, or the app was uninstalled to update it): offer the backups,
@@ -835,15 +934,21 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
                     root.removeView(screen);
                     return;
                 }
-                // only while a cache file is replayed (state 1 with a size), not while the game boots
-                if (screen.getVisibility() != View.VISIBLE && p[0] == 1 && p[2] > 0
+                // only while a cache file is replayed (state 1 with a size) or its pipelines are
+                // built (3), not while the game boots
+                if (screen.getVisibility() != View.VISIBLE && (p[0] == 1 || p[0] == 3) && p[2] > 0
                         && android.os.SystemClock.uptimeMillis() - t0 > 300)
                     screen.setVisibility(View.VISIBLE);
                 if (p[2] > 0) {
                     bar.setProgress((int) Math.min(1000, p[1] * 1000 / p[2]));
                     mySea.setProgress(Math.min(1f, (float) p[1] / p[2]));
                 }
-                detail.setText(getString(R.string.cache_loading_detail, (int) p[3]));
+                if (p[0] == 3) {
+                    t.setText(R.string.cache_building);
+                    detail.setText(getString(R.string.cache_building_detail, (int) p[1], (int) p[2]));
+                } else {
+                    detail.setText(getString(R.string.cache_loading_detail, (int) p[3]));
+                }
                 h.postDelayed(this, 150);
             }
         });
@@ -861,8 +966,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     private void firstStartDefaults() {
         if (prefs.getBoolean("defaults_set", false)) return;
         SharedPreferences.Editor e = prefs.edit().putBoolean("defaults_set", true);
-        // 60 fps (generated): the game at its own 30, every other frame made on the GPU (gfx::rp)
-        if (!prefs.contains("fps_mode")) e.putInt("fps_mode", 5);
+        // 30 fps, the game's own rate: the lightest on the GPU and the steadiest on most phones (60 fps
+        // generated, the earlier default, makes every other frame on the GPU)
+        if (!prefs.contains("fps_mode")) e.putInt("fps_mode", 0);
         if (!prefs.contains("layout") && !controllerAttached()) {
             e.putInt("layout", LAYOUT_HYBRID);
             if (!prefs.contains("pro_controller")) e.putBoolean("pro_controller", false);
@@ -918,6 +1024,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         Native.setOption("mod_swim_speed", prefs.getInt("mod_swim_speed", 100));
         Native.setOption("mod_run_mode", moveMode("mod_run"));
         Native.setOption("mod_swim_mode", moveMode("mod_swim"));
+        Native.setOption("autosave_secs", prefs.getInt("autosave_secs", DEFAULT_AUTOSAVE_SECS));
     }
 
     void applyControlsAppearance() {
@@ -988,9 +1095,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     private final Runnable layoutPoll = new Runnable() {
         @Override public void run() {
             if (controls == null) return;
+            boolean menu = Native.menuOpen();
             boolean pro = Native.getOption("pro_controller") != 0;
             boolean hybrid = !pro && prefs.getInt("layout", LAYOUT_INSET) == LAYOUT_HYBRID;
-            boolean m = hybrid && Native.menuOpen();
+            boolean m = hybrid && menu;
             if (pro != layoutPro || m != hybridMenu) {
                 hybridMenu = m;
                 updateLayout();
@@ -1250,14 +1358,29 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
-        // hidden because a controller is in use: touching the screen brings the controls back
-        if (autoHidden && e.getActionMasked() == MotionEvent.ACTION_DOWN) {
-            autoHidden = false;
-            applyControlsAppearance();
+        if (e.getActionMasked() == MotionEvent.ACTION_DOWN && started) {
+            // a physical controller connected: a touch is for the game's touch screen (menus) and
+            // leaves the on-screen controls hidden and the controller in use (its sensors, rumble)
+            boolean pad = controllerAttached();
+            if (!pad) {
+                // hidden because a controller was in use: touching the screen brings the controls back
+                if (autoHidden) {
+                    autoHidden = false;
+                    applyControlsAppearance();
+                }
+                if (lastController != null) inputSource(null);  // playing by touch
+            }
         }
-        if (e.getActionMasked() == MotionEvent.ACTION_DOWN && lastController != null) inputSource(null);  // playing by touch
         return super.dispatchTouchEvent(e);
     }
+
+    void setProController(boolean on) {
+        setBool("pro_controller", on);
+        updateLayout();
+    }
+
+    /** the controls setting as the player chose it (the GamePad borrowed for a menu doesn't count) */
+    boolean proControllerSetting() { return Native.getOption("pro_controller") != 0; }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
@@ -1285,6 +1408,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             selectButton(e);
             return true;
         }
+        if (controller && code == KeyEvent.KEYCODE_BUTTON_START && startButton(e)) return true;
         if (controller && code == KeyEvent.KEYCODE_BUTTON_MODE) {  // Home / Guide, where the system passes it on
             if (e.getAction() == KeyEvent.ACTION_UP) onMenu();
             return true;
@@ -1297,8 +1421,8 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         return super.dispatchKeyEvent(e);
     }
 
-    // A controller's Select (View): held for 0.6 s it opens the menu, a shorter press is the game's
-    // - button (sent on release, held for a few frames so the game sees it)
+    // A controller's Select (View): held for 0.6 s (or with Start) it opens the menu, a shorter press
+    // is the game's - button (sent on release, held for a few frames so the game sees it)
     private static final long SELECT_HOLD_MS = 600;
     private final android.os.Handler keyHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private boolean selectDown, selectOpenedMenu;
@@ -1308,12 +1432,48 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         onMenu();
     };
 
+    // Select + Start (either first) opens the menu too: Start pressed while Select is held never
+    // reaches the game; Select pressed while Start is held opens it at once
+    private boolean startDown, startForMenu;
+
+    private void menuFromCombo() {
+        keyHandler.removeCallbacks(selectHeld);
+        selectOpenedMenu = true;
+        startDown = false;  // its release goes to the menu
+        onMenu();
+    }
+
+    /** true if the Start event is the menu shortcut's (not for the game) */
+    private boolean startButton(KeyEvent e) {
+        if (e.getAction() == KeyEvent.ACTION_DOWN) {
+            if (e.getRepeatCount() > 0) return startForMenu;
+            startDown = true;
+            startForMenu = selectDown;
+            if (startForMenu) {
+                controllerUsed(e.getDevice());
+                menuFromCombo();
+            }
+            return startForMenu;
+        }
+        if (e.getAction() == KeyEvent.ACTION_UP) {
+            startDown = false;
+            boolean ours = startForMenu;
+            startForMenu = false;
+            return ours;
+        }
+        return startForMenu;
+    }
+
     private void selectButton(KeyEvent e) {
         controllerUsed(e.getDevice());
         if (e.getAction() == KeyEvent.ACTION_DOWN) {
             if (e.getRepeatCount() > 0) return;
             selectDown = true;
             selectOpenedMenu = false;
+            if (startDown) {
+                menuFromCombo();
+                return;
+            }
             keyHandler.postDelayed(selectHeld, SELECT_HOLD_MS);
         } else if (e.getAction() == KeyEvent.ACTION_UP) {
             // the press must have been ours: holding Select also closes the menu, and that release
@@ -1374,12 +1534,38 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         if (rotationGuard != null) rotationGuard.onPause();
         ((android.hardware.input.InputManager) getSystemService(INPUT_SERVICE)).unregisterInputDeviceListener(deviceListener);
         updateDrcDisplay();
-        if (started) Native.setPaused(true);
+        if (started) pauseAfterAutosave();
         // the game's controller select screen may have switched the controls (hle/padscore.cpp)
-        if (started) prefs.edit().putBoolean("pro_controller", Native.getOption("pro_controller") != 0).apply();
+        if (started) prefs.edit().putBoolean("pro_controller", proControllerSetting()).apply();
         if (started) autoBackup();
+        backupHandler.removeCallbacks(periodicBackup);
         if (motion != null) motion.stop();
         if (rumble != null) rumble.stop();
+        if (thermal != null) thermal.stop();
+    }
+
+    // Going to the background (screen locked, another app): Android may end the game there without
+    // a word, so the autosave writes a state first (unless one is less than 30 s old), then the game
+    // pauses; at most ~2.5 s later in any case. Coming back before that keeps it running.
+    private void pauseAfterAutosave() {
+        if (prefs.getInt("autosave_secs", DEFAULT_AUTOSAVE_SECS) <= 0) {
+            Native.setPaused(true);
+            return;
+        }
+        Native.setOption("autosave_now", 1);
+        final long until = android.os.SystemClock.uptimeMillis() + 2500;
+        backupHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (resumed) return;
+                if (Native.getOption("autosave_busy") != 0 && android.os.SystemClock.uptimeMillis() < until) {
+                    backupHandler.postDelayed(this, 100);
+                    return;
+                }
+                Native.setPaused(true);
+                autoBackup();  // the state just written, out of the app as well
+            }
+        }, 150);
     }
 
     @Override
@@ -1392,6 +1578,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         updateDrcDisplay();
         if (started) {
             Native.setPaused(false);
+            backupHandler.removeCallbacks(periodicBackup);
+            backupHandler.postDelayed(periodicBackup, 120_000);
+            startThermal();
             startMotion();
             checkControllerConnected();
         }
@@ -1429,6 +1618,47 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         prefs.edit().putBoolean(key, v).apply();
     }
 
+    // ---- light graphics, for weaker GPUs (Graphics > Graphics: Light): no ambient occlusion and no far
+    // shadow cascade; each stays a setting of its own. On an Adreno 650 at 1x (Outset, night) the GPU
+    // works 20.4 ms a frame, 19.3 with the occlusion off. (A half-size shadow map saved 0.16 ms: its
+    // passes are bound by their ~1150 draws, not by their pixels.)
+    static final int AO_OFF = 3, AO_DEFAULT = 2;  // vk_draw.cpp, g_ao_mode
+
+    boolean lightGraphics() {
+        return Native.getOption("distant_shadows") == 0 && Native.getOption("ao_mode") == AO_OFF;
+    }
+
+    void setLightGraphics(boolean on) {
+        setBool("distant_shadows", !on);
+        setAo(on ? AO_OFF : AO_DEFAULT);
+    }
+
+    // Once, on the first start: GPUs well below the Adreno 650 this was tuned on (Adreno 5xx and the
+    // smaller 6xx, the Mali G31-G72 / G310-G510 families, PowerVR) start with light graphics (the
+    // player can switch back in Graphics.
+    private void lightGraphicsForWeakGpu() {
+        if (prefs.getBoolean("light_auto_checked", false)) return;
+        String gpu = PerfStats.gpuName();
+        if (gpu.isEmpty()) return;  // the renderer hasn't started yet: next time
+        prefs.edit().putBoolean("light_auto_checked", true).apply();
+        if (!weakGpu(gpu) || prefs.contains("ao_mode") || prefs.contains("distant_shadows")) return;
+        Log.i(TAG, "light graphics for " + gpu);
+        setBool("distant_shadows", false);
+        setAo(AO_OFF);
+    }
+
+    static boolean weakGpu(String name) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("Adreno\\D*(\\d{3})").matcher(name);
+        if (m.find()) return Integer.parseInt(m.group(1)) < 640;
+        m = java.util.regex.Pattern.compile("Mali-G(\\d+)").matcher(name);
+        if (m.find()) {
+            int g = Integer.parseInt(m.group(1));
+            return g < 76 || (g >= 100 && g <= 510);
+        }
+        return name.contains("PowerVR");
+    }
+
+
     @Override
     public void onMenu() {
         new OptionsMenu(this).show();
@@ -1443,7 +1673,32 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         if (RES_SCALES[i].equals(prefs.getString("res_scale", "1"))) return;
         prefs.edit().putString("res_scale", RES_SCALES[i]).commit();
         Native.setOption("res_scale", Math.round(Float.parseFloat(RES_SCALES[i]) * 100));
+        if (thermal != null) thermal.configure(Float.parseFloat(RES_SCALES[i]), dynamicResolution());
         controls.resetPerfAverage();
+    }
+
+    // ---- dynamic resolution by temperature (ThermalScaler)
+    private ThermalScaler thermal;
+
+    boolean dynamicResolution() { return prefs.getBoolean("dynamic_res", true); }
+
+    void setDynamicResolution(boolean on) {
+        prefs.edit().putBoolean("dynamic_res", on).apply();
+        startThermal();
+    }
+
+    /** the resolution in use when the temperature lowered it, else null */
+    String thermalResolution() {
+        if (thermal == null) return null;
+        float chosen = Float.parseFloat(prefs.getString("res_scale", "1"));
+        return thermal.current() < chosen ? (thermal.current() == (int) thermal.current() ? String.valueOf((int) thermal.current())
+                : String.valueOf(thermal.current())) : null;
+    }
+
+    private void startThermal() {
+        if (thermal == null) thermal = new ThermalScaler(this);
+        thermal.configure(Float.parseFloat(prefs.getString("res_scale", "1")), dynamicResolution());
+        thermal.start();
     }
 
     void setMod(String key, boolean on) {
@@ -1505,7 +1760,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
                 String m = Native.saveStateMessage();
                 if (!m.isEmpty() && !m.equals(before)) {
                     // a loaded state brings its controls along: keep the setting in step
-                    prefs.edit().putBoolean("pro_controller", Native.getOption("pro_controller") != 0).apply();
+                    prefs.edit().putBoolean("pro_controller", proControllerSetting()).apply();
+                    // a saved state (and, a moment later, its picture) copied out of the app
+                    autoBackup();
+                    h.postDelayed(MainActivity.this::autoBackup, 3000);
                     android.widget.Toast.makeText(MainActivity.this, m, android.widget.Toast.LENGTH_SHORT).show();
                 } else if (android.os.SystemClock.uptimeMillis() < until) {
                     h.postDelayed(this, 200);
@@ -1609,10 +1867,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     private static byte[] readAll(android.content.ContentResolver cr, android.net.Uri u) throws IOException {
         try (InputStream in = cr.openInputStream(u)) {
             if (in == null) throw new IOException("cannot read " + u);
-            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
-            return out.toByteArray();
+            return Translation.readStream(in);
         }
     }
 
@@ -1923,6 +2178,8 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     // the game thread on the prime core, the renderer on the performance cores: on a Galaxy S20 FE
     // (no ADPF) Outset went from 30 to 40-46 fps at 60 fps mode against letting the system place them
     static final int DEFAULT_CORE_MODE = 3;
+    // the autosave (Saves > Autosave) is on by default: a state in the Auto slot every 5 minutes of play
+    static final int DEFAULT_AUTOSAVE_SECS = 300;
     // the HUD layout (aspect.cpp, HudEditor): per part an offset in the game's layout pixels (x right,
     // y down), a size in percent and whether it is shown
     static final int HUD_PARTS = 5;
@@ -2132,6 +2389,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         }
         if (request == PICK_DISC && result == RESULT_OK && data != null && data.getData() != null) {
             startExtraction(data.getData());
+            return;
+        }
+        if (request == PICK_VAULT) {
+            vaultResult();
             return;
         }
         if ((request == PICK_EXPORT || request == PICK_IMPORT) && result == RESULT_OK && data != null && data.getData() != null) {

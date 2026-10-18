@@ -60,7 +60,9 @@ constexpr uint32_t kStageKeys = 0x778 + 0x20, kStageDungeonItems = 0x778 + 0x21;
 // the heap block g_dComIfG_gameInfo lives in (pointer in static data; the save data at +0xC92C,
 // 0x145AC92C in USA sessions); USA addresses, release::Data maps them for EUR
 const release::Data kInfoPointer{0x10114B90}, kStageInfo{0x1046F0B0};
+}  // namespace
 
+// public (mods.h): the autosave uses these to know when a file is actually being played
 uint32_t save_addr() {
     static const uint32_t over = getenv("WWHD_CHEAT_SAVE_ADDR") ? (uint32_t)strtoul(getenv("WWHD_CHEAT_SAVE_ADDR"), nullptr, 16) : 0;
     return over ? over : ld32(kInfoPointer) + 0xC92C;
@@ -77,7 +79,9 @@ bool save_loaded(uint32_t s) {
     std::string st = stage();
     if (st.empty() || st == "sea_T" || st == "Name") return false;  // title, file select
     uint16_t max = ld16(s + kMaxLife), life = ld16(s + kLife);
-    if (max < 12 || max > 80 || max % 4 || life > max || ld16(s + kRupee) > 5000 || ld8(s + kWallet) > 2) return false;
+    // no "% 4": the game counts quarter hearts, so a collected heart piece leaves the maximum
+    // at 12 + odd
+    if (max < 12 || max > 80 || life > max || ld16(s + kRupee) > 5000 || ld8(s + kWallet) > 2) return false;
     // the return stage: a NUL-terminated name in 8 bytes, at least 3 characters ("sea", "sea_T", "M_NewD2")
     int n = 0;
     for (; n < 8; n++) {
@@ -87,6 +91,7 @@ bool save_loaded(uint32_t s) {
     }
     return n >= 3;
 }
+namespace {
 
 void give(uint32_t s, int slot, uint8_t item, uint8_t got_bits = 1) {
     st8(s + kItems + slot, item);
@@ -346,7 +351,44 @@ bool moon_jump_move(uint32_t link, float& x, float& z) {
 // dComIfG_play_c::mNextStage (dStage_nextStage_c): name[8], point s16, room s8, layer s8, enabled s8, wipe u8
 constexpr uint32_t kNextStage = 0x5140;
 
+// test aid: WWHD_TEST_THUNDER=1 keeps the thunder process flashing wherever the save file plays
+// (g_env_light 10475A68 + 0xAB0: mThunderEff, GameCube offset 0xA30 + 0x80; dKyr_thunder_move flashes
+// at random); =2 a whole sea storm: the sea's weather dice held at "thunder, heavy rain"
+// (mDiceWeatherMode, 0xC8B + 0x80), so the game itself brings the rain, the dark colours and the thunder;
+// =3 the thunder of 1 with heavy rain
+static void thunder_service() {
+    static const int mode = getenv("WWHD_TEST_THUNDER") ? atoi(getenv("WWHD_TEST_THUNDER")) : 0;
+    if (!mode) return;
+    uint32_t s = save_addr();
+    if (s < 0x10000000 || !save_loaded(s)) return;
+    static const release::Data kEnvLight{0x10475A68};
+    const uint32_t thunder = kEnvLight + 0xAB0;
+    // WWHD_TEST_TIME=degrees holds the time of day (dSv_player_status_b_c::mTime, save + 0x18 + 0xC:
+    // 0-360, 15 a game hour; 0 midnight)
+    if (const char* t = getenv("WWHD_TEST_TIME")) {
+        float v = (float)atof(t);
+        uint32_t bits;
+        memcpy(&bits, &v, 4);
+        st32(s + 0x24, bits);
+    }
+    if (mode == 2) {
+        st8(kEnvLight + 0xD0B, 5);  // DICE_MODE_THUNDER_HEAVY_e
+    } else {
+        if (mode == 3) st32(kEnvLight + 0xA40, 250);  // =3: heavy rain as well (mRainCount, 0x9C0 + 0x80)
+        if (ld32(thunder + 4) == 0) st32(thunder + 4, 1);  // mMode
+        if (ld8(thunder) == 0) {  // mStatus: the process ends with each flash where mMode was cleared
+            st8(thunder, 1);
+            st8(thunder + 1, 0);  // mState: waiting for the next flash (dKyr_thunder_init)
+        }
+    }
+    static int n = 0;
+    if (n++ % 60 == 0)
+        LOG("[test] thunder status %u state %u mode %u flash %08X; rain %u, weather %u", ld8(thunder), ld8(thunder + 1),
+            ld32(thunder + 4), ld32(thunder + 8), ld32(kEnvLight + 0xA40), ld8(kEnvLight + 0xD0B));
+}
+
 void warp_service() {
+    thunder_service();
     static std::vector<std::string> places;
     static size_t next = 0;
     static int frames = -1, period = 0;

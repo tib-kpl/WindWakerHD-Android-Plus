@@ -37,7 +37,11 @@
 #include <zlib.h>  // blocks are deflated instead of LZ4 (states don't move between platforms)
 #endif
 #include <zstd.h>
+#ifdef __aarch64__
+#include <arm_neon.h>
+#endif
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -54,8 +58,11 @@
 #include <unordered_map>
 
 #include "runtime.h"
+#include "platform.h"
 #include "input.h"
+#include "interp.h"
 #include "mem_writes.h"
+#include "mods/mods.h"
 #include "release.h"
 
 // module sections
@@ -149,6 +156,17 @@ struct Snapshot {
     Header h{};
     std::vector<uint8_t> payload;
     std::vector<uint8_t> blob;
+    // version 2: the slot file mapped read-only, the chunks point into it. File pages, not the app's
+    // own memory: Android can drop and re-read them under pressure instead of ending the game (the
+    // ~235 MB read into a buffer got the game killed for low memory on 6 GB phones)
+    void* map = nullptr;
+    size_t mapSize = 0;
+    Snapshot() = default;
+    Snapshot(const Snapshot&) = delete;
+    Snapshot& operator=(const Snapshot&) = delete;
+    ~Snapshot() {
+        if (map) munmap(map, mapSize);
+    }
     std::map<uint32_t, std::pair<size_t, size_t>> sections;  // tag -> (offset, size)
     std::unordered_map<uint32_t, ChunkRef> chunks;            // chunk address -> data (absent = zero)
     std::vector<Region> regs;
@@ -190,6 +208,15 @@ struct Snapshot {
     }
 };
 
+// a worker thread's body: off the big cores the game thread that starts it may be kept on (a new
+// thread inherits that; 8 workers on one core made a 565 MB capture take over a second)
+template <class F> auto any_core(F& f) {
+    return [&f] {
+        platform::set_thread_name("wwhd-state");
+        f();
+    };
+}
+
 std::mutex g_mu;  // messages, pending requests
 std::mutex g_io;  // one slot file operation at a time
 std::string g_message;
@@ -197,6 +224,8 @@ std::chrono::steady_clock::time_point g_message_time;
 std::atomic<int> g_save_req{0};
 std::shared_ptr<Snapshot> g_load_ready;   // decompressed, waiting for the frame boundary
 std::atomic<bool> g_loading{false};       // a slot file is being read
+std::atomic<int> g_autosave_secs{0};      // autosave interval in seconds (0 = off)
+std::atomic<bool> g_autosave_now{false};  // the app is going to the background: an autosave first
 int g_attempts = 0;
 const Snapshot* g_check = nullptr;        // snapshot whose memory snap_ld32 reads
 uint64_t g_check_serial = 0;              // bumped with each g_check (snap_ld32's unpacked chunk)
@@ -335,74 +364,6 @@ std::string stage_name() {
 }
 
 // ---------------------------------------------------------------- memory
-// guest memory, captured while the game is frozen: the chunks that aren't all zero, compressed on
-// every core straight from guest memory
-struct Captured {
-    struct Piece {
-        uint32_t thread, offset, comp;  // comp 0: stored as it is
-    };
-    std::vector<Region> regs;
-    std::vector<uint32_t> addrs;  // chunk addresses, in order
-    std::vector<Piece> pieces;    // by chunk
-    std::vector<std::vector<uint8_t>> out;  // by compressing thread
-    size_t bytes() const {
-        size_t n = 0;
-        for (auto& o : out) n += o.size();
-        return n;
-    }
-};
-
-std::shared_ptr<Captured> capture_memory() {
-    auto c = std::make_shared<Captured>();
-    c->regs = regions();
-    std::vector<char> vec(kChunk / getpagesize() + 1);
-    for (auto& g : c->regs) {
-        for (uint32_t off = 0; off < g.size; off += kChunk) {
-            uint8_t* p = mem::ptr(g.base + off);
-            // untouched pages are zero: skip them without reading (reading would commit them)
-            if (page_residency(p, kChunk, vec.data()) == 0) {
-                bool touched = false;
-                for (size_t i = 0; i < kChunk / (size_t)getpagesize(); i++) touched |= vec[i] != 0;
-                if (!touched) continue;
-            }
-            const uint64_t* q = (const uint64_t*)p;
-            bool zero = true;
-            for (size_t i = 0; i < kChunk / 8 && zero; i++) zero = q[i] == 0;
-            if (!zero) c->addrs.push_back(g.base + off);
-        }
-    }
-    const unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
-    c->out.resize(nt);
-    c->pieces.resize(c->addrs.size());
-    std::atomic<size_t> next{0};
-    auto work = [&](unsigned t) {
-        ZSTD_CCtx* cx = ZSTD_createCCtx();
-        std::vector<uint8_t> tmp(ZSTD_compressBound(kChunk));
-        std::vector<uint8_t>& o = c->out[t];
-        o.reserve((c->addrs.size() / nt + 16) * (kChunk / 2));  // address space; grows if needed
-        for (size_t i; (i = next.fetch_add(1, std::memory_order_relaxed)) < c->addrs.size();) {
-            const uint8_t* src = mem::ptr(c->addrs[i]);
-            size_t n = cx ? ZSTD_compressCCtx(cx, tmp.data(), tmp.size(), src, kChunk, kZstdLevel) : 0;
-            Captured::Piece& pc = c->pieces[i];
-            pc.thread = t;
-            pc.offset = (uint32_t)o.size();
-            if (!cx || ZSTD_isError(n) || n >= kChunk) {
-                o.insert(o.end(), src, src + kChunk);
-                pc.comp = 0;
-            } else {
-                o.insert(o.end(), tmp.data(), tmp.data() + n);
-                pc.comp = (uint32_t)n;
-            }
-        }
-        ZSTD_freeCCtx(cx);
-    };
-    std::vector<std::thread> pool;
-    for (unsigned t = 1; t < nt; t++) pool.emplace_back(work, t);
-    work(0);
-    for (auto& th : pool) th.join();
-    return c;
-}
-
 void restore_memory(const Snapshot& s) {
     // the saved chunks, unpacked on every core straight into guest memory (read_slot checked them)
     std::vector<std::pair<uint32_t, ChunkRef>> list(s.chunks.begin(), s.chunks.end());
@@ -414,7 +375,7 @@ void restore_memory(const Snapshot& s) {
     };
     const unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
     std::vector<std::thread> pool;
-    for (unsigned t = 1; t < nt; t++) pool.emplace_back(work);
+    for (unsigned t = 1; t < nt; t++) pool.emplace_back(any_core(work));
     work();
     for (auto& th : pool) th.join();
     if (bad) LOG("[savestate] %d memory chunks could not be unpacked", bad.load());
@@ -436,39 +397,339 @@ void restore_memory(const Snapshot& s) {
     }
 }
 
-// ---------------------------------------------------------------- slot files
-// version 2: header, u64 size + zstd sections, u32 count + regions, then per chunk u32 address,
-// u32 compressed size (0: 64 KiB as they are) and its bytes
-bool write_slot(int slot, const Header& h0, const std::vector<uint8_t>& sections, const Captured& c) {
-    Header h = h0;
-    h.blocks = (uint32_t)c.addrs.size();
-    h.raw_size = sections.size();
-    std::vector<uint8_t> sc(ZSTD_compressBound(sections.size()));
-    size_t sn = ZSTD_compress(sc.data(), sc.size(), sections.data(), sections.size(), kZstdLevel);
-    if (ZSTD_isError(sn)) return false;
-    std::string tmp = slot_path(slot, "tmp");
-    FILE* f = fopen(tmp.c_str(), "wb");
-    if (!f) {  // the folder was deleted while the game ran: made again
-        make_dirs(state_dir());
-        f = fopen(tmp.c_str(), "wb");
+// guest memory captured straight into the slot file while the game is frozen: the chunks that aren't
+// all zero, compressed on every core, each thread writing its records out in ~4 MB batches. Only
+// those batches are held (holding all ~235 MB of a state until a background thread wrote them got the
+// game killed for low memory a few seconds after saving on 6 GB phones); the file's pages are the
+// system's to write back. Records are in no particular order (read_slot_v2 doesn't need one).
+struct StreamResult {
+    bool ok = false;
+    size_t chunks = 0, bytes = 0;  // chunks written and their compressed bytes
+};
+
+StreamResult capture_to_file(FILE* f, std::mutex& fm) {
+    StreamResult res;
+    auto t0 = std::chrono::steady_clock::now();
+    std::vector<Region> regs = regions();
+    std::vector<uint32_t> addrs;
+    std::vector<char> vec(kChunk / getpagesize() + 1);
+    for (auto& g : regs) {
+        for (uint32_t off = 0; off < g.size; off += kChunk) {
+            uint8_t* p = mem::ptr(g.base + off);
+            // untouched pages are zero: skip them without reading (reading would commit them)
+            if (page_residency(p, kChunk, vec.data()) == 0) {
+                bool touched = false;
+                for (size_t i = 0; i < kChunk / (size_t)getpagesize(); i++) touched |= vec[i] != 0;
+                if (!touched) continue;
+            }
+            const uint64_t* q = (const uint64_t*)p;
+            bool zero = true;
+            for (size_t i = 0; i < kChunk / 8 && zero; i++) zero = q[i] == 0;
+            if (!zero) addrs.push_back(g.base + off);
+        }
     }
-    if (!f) return false;
-    uint64_t sn64 = sn;
-    uint32_t nr = (uint32_t)c.regs.size();
-    bool ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(&sn64, 8, 1, f) == 1 && fwrite(sc.data(), 1, sn, f) == sn &&
-              fwrite(&nr, 4, 1, f) == 1 && fwrite(c.regs.data(), sizeof(Region), nr, f) == nr;
-    for (size_t i = 0; i < c.addrs.size() && ok; i++) {
-        const Captured::Piece& pc = c.pieces[i];
-        uint32_t rec[2] = {c.addrs[i], pc.comp};
-        size_t n = pc.comp ? pc.comp : kChunk;
-        ok = fwrite(rec, 8, 1, f) == 1 && fwrite(c.out[pc.thread].data() + pc.offset, 1, n, f) == n;
-    }
-    ok = fclose(f) == 0 && ok;
-    if (ok) ok = rename(tmp.c_str(), slot_path(slot).c_str()) == 0;
-    else unlink(tmp.c_str());
-    return ok;
+    auto t1 = std::chrono::steady_clock::now();
+    // the count and the regions go first: patched into the header written by the caller
+    res.chunks = addrs.size();
+    uint32_t nr = (uint32_t)regs.size();
+    bool ok = fwrite(&nr, 4, 1, f) == 1 && fwrite(regs.data(), sizeof(Region), nr, f) == nr;
+    std::atomic<bool> good{ok};
+    std::atomic<size_t> bytes{0};
+    std::atomic<size_t> next{0};
+    constexpr size_t kBatch = 4 << 20;
+    static const int level = getenv("WWHD_SS_LEVEL") ? atoi(getenv("WWHD_SS_LEVEL")) : kZstdLevel;
+    auto work = [&] {
+        ZSTD_CCtx* cx = ZSTD_createCCtx();
+        std::vector<uint8_t> tmp(ZSTD_compressBound(kChunk));
+        std::vector<uint8_t> out;
+        out.reserve(kBatch + kChunk + 16);
+        auto flush = [&] {
+            if (out.empty()) return;
+            std::lock_guard<std::mutex> lk(fm);
+            if (good && fwrite(out.data(), 1, out.size(), f) != out.size()) good = false;
+            bytes += out.size();
+            out.clear();
+        };
+        for (size_t i; good && (i = next.fetch_add(1, std::memory_order_relaxed)) < addrs.size();) {
+            const uint8_t* src = mem::ptr(addrs[i]);
+            size_t n = cx ? ZSTD_compressCCtx(cx, tmp.data(), tmp.size(), src, kChunk, level) : 0;
+            const bool stored = !cx || ZSTD_isError(n) || n >= kChunk;
+            uint32_t rec[2] = {addrs[i], stored ? 0u : (uint32_t)n};
+            out.insert(out.end(), (const uint8_t*)rec, (const uint8_t*)rec + 8);
+            if (stored) out.insert(out.end(), src, src + kChunk);
+            else out.insert(out.end(), tmp.data(), tmp.data() + n);
+            if (out.size() >= kBatch) flush();
+        }
+        flush();
+        ZSTD_freeCCtx(cx);
+    };
+    const unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+    std::vector<std::thread> pool;
+    for (unsigned t = 1; t < nt; t++) pool.emplace_back(any_core(work));
+    work();
+    for (auto& th : pool) th.join();
+    auto t2 = std::chrono::steady_clock::now();
+    LOG("[savestate] scan %.1f ms, compress+write %.1f ms (%u threads, level %d)",
+        std::chrono::duration<double, std::milli>(t1 - t0).count(), std::chrono::duration<double, std::milli>(t2 - t1).count(), nt, level);
+    res.ok = good;
+    res.bytes = bytes;
+    return res;
 }
 
+
+// ---------------------------------------------------------------- the autosave's capture ahead
+// Writing ~235 MB with the game frozen held it for 0.4-1.6 s (the page cache taking that much at
+// once; compressing is the smaller part). Before an autosave is due, the memory is compressed into
+// slotN.pre while the game runs (background threads, copies of the chunks, each one's hash kept);
+// at the autosave only the chunks whose hash changed since are compressed while frozen, into memory,
+// and the slot file is put together afterwards: header and sections of the frozen moment, the
+// regions, the records written ahead, then the changed ones (read_slot_v2: a later record of an
+// address replaces an earlier one; a chunk that became zero gets a record of zeros).
+// 16 lanes of xxh32 rounds over the chunk (NEON-friendly: ~3x the speed of 64-bit multiplies; a
+// round is one-to-one in both the lane and the word, so a single changed word always shows)
+uint64_t chunk_hash(const uint8_t* p) {
+    constexpr uint32_t P1 = 2654435761u, P2 = 2246822519u, P3 = 3266489917u;
+    uint32_t l[16];
+    for (int k = 0; k < 16; k++) l[k] = P1 * (uint32_t)(k + 1);
+#ifdef __aarch64__
+    uint32x4_t a[4];
+    for (int j = 0; j < 4; j++) a[j] = vld1q_u32(l + 4 * j);
+    const uint32x4_t p1 = vdupq_n_u32(P1), p2 = vdupq_n_u32(P2);
+    for (size_t i = 0; i < kChunk; i += 64)
+        for (int j = 0; j < 4; j++) {
+            uint32x4_t x = vmlaq_u32(a[j], vld1q_u32((const uint32_t*)(p + i) + 4 * j), p2);
+            a[j] = vmulq_u32(vsriq_n_u32(vshlq_n_u32(x, 13), x, 19), p1);
+        }
+    for (int j = 0; j < 4; j++) vst1q_u32(l + 4 * j, a[j]);
+#else
+    for (size_t i = 0; i < kChunk; i += 64) {
+        uint32_t v[16];
+        memcpy(v, p + i, 64);
+        for (int k = 0; k < 16; k++) {
+            uint32_t a = l[k] + v[k] * P2;
+            l[k] = ((a << 13) | (a >> 19)) * P1;
+        }
+    }
+#endif
+    uint64_t h = 0x9E3779B97F4A7C15ull;
+    for (int k = 0; k < 16; k++) {
+        h ^= l[k] * (uint64_t)P3 + (uint64_t)k;
+        h = ((h << 27) | (h >> 37)) * 0xC2B2AE3D27D4EB4Full;
+    }
+    return h ^ (h >> 31);
+}
+
+bool chunk_zero(const uint8_t* p) {
+    const uint64_t* q = (const uint64_t*)p;
+    for (size_t i = 0; i < kChunk / 8; i++)
+        if (q[i]) return false;
+    return true;
+}
+
+// the chunks of `regs` whose pages were ever touched (untouched pages are zero; reading them would commit them)
+std::vector<uint32_t> touched_chunks(const std::vector<Region>& regs) {
+    std::vector<uint32_t> out;
+    std::vector<char> vec(kChunk / getpagesize() + 1);
+    for (auto& g : regs)
+        for (uint32_t off = 0; off < g.size; off += kChunk) {
+            uint8_t* p = mem::ptr(g.base + off);
+            if (page_residency(p, kChunk, vec.data()) == 0) {
+                bool touched = false;
+                for (size_t i = 0; i < kChunk / (size_t)getpagesize(); i++) touched |= vec[i] != 0;
+                if (!touched) continue;
+            }
+            out.push_back(g.base + off);
+        }
+    return out;
+}
+
+void append_record(std::vector<uint8_t>& out, ZSTD_CCtx* cx, std::vector<uint8_t>& tmp, uint32_t addr, const uint8_t* src) {
+    size_t n = cx ? ZSTD_compressCCtx(cx, tmp.data(), tmp.size(), src, kChunk, kZstdLevel) : 0;
+    const bool stored = !cx || ZSTD_isError(n) || n >= kChunk;
+    uint32_t rec[2] = {addr, stored ? 0u : (uint32_t)n};
+    out.insert(out.end(), (const uint8_t*)rec, (const uint8_t*)rec + 8);
+    if (stored) out.insert(out.end(), src, src + kChunk);
+    else out.insert(out.end(), tmp.data(), tmp.data() + n);
+}
+
+struct Ahead {
+    std::mutex mu;
+    // 0 none, 1 being written, 2 ready, 3 an autosave being put together from it
+    std::atomic<int> state{0};
+    std::vector<Region> regs;
+    std::unordered_map<uint32_t, uint64_t> hashes;  // address -> hash of what its record holds
+    size_t records = 0, bytes = 0;
+    std::chrono::steady_clock::time_point ready;
+} g_ahead;
+
+void ahead_write() {
+    platform::set_thread_name("wwhd-autosave");
+    setpriority(PRIO_PROCESS, 0, 10);  // this thread (Linux): behind the game's threads
+    const auto t0 = std::chrono::steady_clock::now();
+    std::string path = slot_path(kAutoSlot, "pre");
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) {
+        make_dirs(state_dir());
+        f = fopen(path.c_str(), "wb");
+    }
+    std::vector<Region> regs = regions();
+    std::vector<uint32_t> addrs = touched_chunks(regs);
+    std::mutex fm, hm;
+    std::unordered_map<uint32_t, uint64_t> hashes;
+    hashes.reserve(addrs.size());
+    std::atomic<size_t> next{0}, records{0}, bytes{0};
+    std::atomic<bool> good{f != nullptr};
+    auto work = [&] {
+        setpriority(PRIO_PROCESS, 0, 10);
+        ZSTD_CCtx* cx = ZSTD_createCCtx();
+        std::vector<uint8_t> tmp(ZSTD_compressBound(kChunk)), copy(kChunk), out;
+        std::vector<std::pair<uint32_t, uint64_t>> mine;
+        out.reserve((4 << 20) + kChunk + 16);
+        auto flush = [&] {
+            if (out.empty()) return;
+            std::lock_guard<std::mutex> lk(fm);
+            if (good && fwrite(out.data(), 1, out.size(), f) != out.size()) good = false;
+            bytes += out.size();
+            out.clear();
+        };
+        for (size_t i; good && (i = next.fetch_add(1, std::memory_order_relaxed)) < addrs.size();) {
+            memcpy(copy.data(), mem::ptr(addrs[i]), kChunk);  // the game runs: what is compressed is what is hashed
+            if (chunk_zero(copy.data())) continue;
+            mine.push_back({addrs[i], chunk_hash(copy.data())});
+            append_record(out, cx, tmp, addrs[i], copy.data());
+            records++;
+            if (out.size() >= (4u << 20)) flush();
+        }
+        flush();
+        ZSTD_freeCCtx(cx);
+        std::lock_guard<std::mutex> lk(hm);
+        for (auto& [a, h] : mine) hashes[a] = h;
+    };
+    std::vector<std::thread> pool;
+    pool.emplace_back(any_core(work));
+    work();
+    for (auto& th : pool) th.join();
+    if (f && fclose(f) != 0) good = false;
+    std::lock_guard<std::mutex> lk(g_ahead.mu);
+    if (!good) {
+        unlink(path.c_str());
+        g_ahead.state = 0;
+        LOG("[savestate] autosave capture ahead failed");
+        return;
+    }
+    g_ahead.regs = regs;
+    g_ahead.hashes.swap(hashes);
+    g_ahead.records = records;
+    g_ahead.bytes = bytes;
+    g_ahead.ready = std::chrono::steady_clock::now();
+    g_ahead.state = 2;
+    LOG("[savestate] autosave captured ahead: %zu chunks as %.1f MB in %.0f ms", (size_t)records, bytes / 1048576.0,
+        std::chrono::duration<double, std::milli>(g_ahead.ready - t0).count());
+}
+
+void ahead_start() {
+    int idle = 0;
+    if (!g_ahead.state.compare_exchange_strong(idle, 1)) return;
+    std::thread(ahead_write).detach();
+}
+
+// with the game frozen: the chunks that differ from what slotN.pre holds, compressed into `out`
+bool ahead_delta(std::vector<uint8_t>& out, size_t& records) {
+    if (g_ahead.state.load() != 2 || regions().size() != g_ahead.regs.size()) return false;
+    std::vector<Region> regs = regions();
+    for (size_t i = 0; i < regs.size(); i++)
+        if (regs[i].base != g_ahead.regs[i].base || regs[i].size != g_ahead.regs[i].size) return false;
+    const auto t0 = std::chrono::steady_clock::now();
+    std::vector<uint32_t> addrs = touched_chunks(regs);
+    const auto t1 = std::chrono::steady_clock::now();
+    std::atomic<size_t> next{0}, count{0}, total{0};
+    std::atomic<bool> tooMuch{false};
+    std::mutex om;
+    // held in memory until written: past 64 MB (most of it changed) the usual capture is used
+    constexpr size_t kMaxDelta = 64u << 20;
+    auto work = [&] {
+        ZSTD_CCtx* cx = ZSTD_createCCtx();
+        std::vector<uint8_t> tmp(ZSTD_compressBound(kChunk)), mine;
+        for (size_t i; !tooMuch && (i = next.fetch_add(1, std::memory_order_relaxed)) < addrs.size();) {
+            const uint8_t* p = mem::ptr(addrs[i]);
+            auto it = g_ahead.hashes.find(addrs[i]);
+            if (it == g_ahead.hashes.end() ? chunk_zero(p) : chunk_hash(p) == it->second) continue;
+            const size_t before = mine.size();
+            append_record(mine, cx, tmp, addrs[i], p);
+            count++;
+            if ((total += mine.size() - before) > kMaxDelta) tooMuch = true;
+        }
+        ZSTD_freeCCtx(cx);
+        std::lock_guard<std::mutex> lk(om);
+        out.insert(out.end(), mine.begin(), mine.end());
+    };
+    const unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+    std::vector<std::thread> pool;
+    for (unsigned t = 1; t < nt; t++) pool.emplace_back(any_core(work));
+    work();
+    for (auto& th : pool) th.join();
+    LOG("[savestate] changed chunks: %zu looked at in %.0f ms, compared in %.0f ms", addrs.size(),
+        std::chrono::duration<double, std::milli>(t1 - t0).count(),
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count());
+    if (tooMuch) {
+        out.clear();
+        out.shrink_to_fit();
+        return false;
+    }
+    records = count;
+    return true;
+}
+
+// after the thaw: the slot file from the header and sections, the records written ahead and `delta`
+void ahead_finish(Header h, std::vector<uint8_t> sections, std::vector<uint8_t> delta, size_t deltaRecords, std::string label) {
+    std::thread([h, sections = std::move(sections), delta = std::move(delta), deltaRecords, label]() mutable {
+        platform::set_thread_name("wwhd-autosave");
+        const auto t0 = std::chrono::steady_clock::now();
+        std::string pre = slot_path(kAutoSlot, "pre"), tmp = slot_path(kAutoSlot, "tmp");
+        bool ok = false;
+        {
+            std::lock_guard<std::mutex> io(g_io);
+            h.blocks = (uint32_t)(g_ahead.records + deltaRecords);
+            FILE* in = fopen(pre.c_str(), "rb");
+            FILE* f = in ? fopen(tmp.c_str(), "wb") : nullptr;
+            if (f) {
+                uint64_t sn = sections.size();
+                uint32_t nr = (uint32_t)g_ahead.regs.size();
+                ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(&sn, 8, 1, f) == 1 && fwrite(sections.data(), 1, sn, f) == sn &&
+                     fwrite(&nr, 4, 1, f) == 1 && fwrite(g_ahead.regs.data(), sizeof(Region), nr, f) == nr;
+                std::vector<uint8_t> buf(1 << 20);
+                size_t copied = 0;
+                for (size_t n; ok && (n = fread(buf.data(), 1, buf.size(), in)) > 0;) {
+                    ok = fwrite(buf.data(), 1, n, f) == n;
+                    copied += n;
+                }
+                ok = ok && copied == g_ahead.bytes && (delta.empty() || fwrite(delta.data(), 1, delta.size(), f) == delta.size());
+                ok = fclose(f) == 0 && ok;
+            }
+            if (in) fclose(in);
+            if (ok) ok = rename(tmp.c_str(), slot_path(kAutoSlot).c_str()) == 0;
+            else unlink(tmp.c_str());
+            unlink(pre.c_str());
+        }
+        LOG("[savestate] slot %d: %s from the capture ahead + %zu changed chunks (%.1f MB) in %.0f ms", kAutoSlot,
+            ok ? "written" : "WRITE FAILED", deltaRecords, delta.size() / 1048576.0,
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        {
+            std::lock_guard<std::mutex> lk(g_mu);
+            g_message = ok ? "Saved to slot " + std::to_string(kAutoSlot) + label : "Slot " + std::to_string(kAutoSlot) + ": write failed";
+            g_message_time = std::chrono::steady_clock::now();
+        }
+        {
+            std::lock_guard<std::mutex> lk(g_ahead.mu);
+            g_ahead.hashes.clear();
+            g_ahead.state = 0;
+        }
+    }).detach();
+}
+
+// ---------------------------------------------------------------- slot files
+// version 2: header, u64 size + zstd sections, u32 count + regions, then per chunk u32 address,
+// u32 compressed size (0: 64 KiB as they are) and its bytes (do_save, capture_to_file)
 bool read_header(FILE* f, Header& h, std::string& why) {
     memset(&h, 0, sizeof h);
     if (fread(&h, kHeaderV1Size, 1, f) != 1 || memcmp(h.magic, kMagic, 8) != 0) { why = "not a save state"; return false; }
@@ -500,10 +761,20 @@ bool read_slot_v2(FILE* f, Snapshot& s, std::string& why) {
     long at = ftell(f);
     if (at < 0 || fseek(f, 0, SEEK_END) != 0) return false;
     long end = ftell(f);
-    if (end < at || fseek(f, at, SEEK_SET) != 0) return false;
-    s.blob.resize((size_t)(end - at));
-    if (fread(s.blob.data(), 1, s.blob.size(), f) != s.blob.size()) return false;
-    Reader r(s.blob.data(), s.blob.size());
+    if (end < at) return false;
+    void* m = end > 0 ? mmap(nullptr, (size_t)end, PROT_READ, MAP_PRIVATE, fileno(f), 0) : MAP_FAILED;
+    if (m == MAP_FAILED) {  // read into memory as before
+        if (fseek(f, at, SEEK_SET) != 0) return false;
+        s.blob.resize((size_t)(end - at));
+        if (fread(s.blob.data(), 1, s.blob.size(), f) != s.blob.size()) return false;
+    } else {
+        s.map = m;
+        s.mapSize = (size_t)end;
+        madvise(m, (size_t)end, MADV_SEQUENTIAL);
+    }
+    const uint8_t* data = s.map ? (const uint8_t*)s.map + at : s.blob.data();
+    const size_t dataSize = (size_t)(end - at);
+    Reader r(data, dataSize);
     std::vector<std::pair<uint32_t, ChunkRef>> list;
     list.reserve(s.h.blocks);
     for (uint32_t i = 0; i < s.h.blocks && r.ok; i++) {
@@ -522,7 +793,7 @@ bool read_slot_v2(FILE* f, Snapshot& s, std::string& why) {
     };
     const unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
     std::vector<std::thread> pool;
-    for (unsigned t = 1; t < nt; t++) pool.emplace_back(work);
+    for (unsigned t = 1; t < nt; t++) pool.emplace_back(any_core(work));
     work();
     for (auto& th : pool) th.join();
     if (bad || !r.ok || !s.parse_sections()) { why = "file is corrupt"; return false; }
@@ -595,7 +866,7 @@ bool read_slot_v1(FILE* f, Snapshot& s, std::string& why) {
             ZSTD_freeCCtx(cx);
         };
         std::vector<std::thread> pool;
-        for (unsigned t = 1; t < nt; t++) pool.emplace_back(work);
+        for (unsigned t = 1; t < nt; t++) pool.emplace_back(any_core(work));
         work();
         for (auto& th : pool) th.join();
         for (size_t i = 0; i < n; i++) {
@@ -749,7 +1020,9 @@ bool check_dispatch(Reader r, std::string& why) {
         uint32_t a = r.u32();
         std::string name = r.str();
         auto it = cur.find(a);
-        if (it == cur.end() || it->second != name) {
+        if (it != cur.end() && it->second == name) continue;
+        // saved by another session or version (other addresses): the same function there too
+        if (!dispatch::alias_host(a, name)) {
             why = "host function " + name + " is not registered at the same address";
             return false;
         }
@@ -776,7 +1049,9 @@ bool do_save(int slot) {
         message("Slot %d: not saved (game busy:%s)", slot, busy.c_str());
         return true;
     }
+    const auto tq = std::chrono::steady_clock::now();
     gx2_ss_drain();
+    const auto tg = std::chrono::steady_clock::now();
     Writer threads_w;
     if (!threads_ss_save(threads_w, why)) {
         threads::thaw();
@@ -784,27 +1059,30 @@ bool do_save(int slot) {
         message("Slot %d: not saved (%s)", slot, why.c_str());
         return true;
     }
-    auto payload = std::make_shared<Writer>();  // the sections (memory: capture_memory)
+    auto payload = std::make_shared<Writer>();  // the sections (memory: capture_to_file)
     put_section(*payload, kSecThreads, threads_w);
+    const auto tt = std::chrono::steady_clock::now();
     Writer w;
     mem_ss_save(w);
     put_section(*payload, kSecHeaps, w);
+    const auto th_ = std::chrono::steady_clock::now();
     w = Writer();
     fs_ss_save(w);
     put_section(*payload, kSecFiles, w);
     w = Writer();
     ax_ss_save(w);
     put_section(*payload, kSecAudio, w);
+    const auto ta = std::chrono::steady_clock::now();
     w = Writer();
     gx2_ss_save(w);
     put_section(*payload, kSecGx2, w);
+    const auto tx = std::chrono::steady_clock::now();
     w = Writer();
     save_allocs(w);
     put_section(*payload, kSecAllocs, w);
     w = Writer();
     save_dispatch(w);
     put_section(*payload, kSecDispatch, w);
-    auto memory = capture_memory();
     Header h{};
     memcpy(h.magic, kMagic, 8);
     h.version = kVersion;
@@ -816,28 +1094,83 @@ bool do_save(int slot) {
     h.game_id = game_id();
     h.cpu_size = sizeof(Cpu);
     h.controller = input::pro_controller() ? 2 : 1;
+    h.raw_size = payload->b.size();
+    // the autosave with its memory captured ahead: only what changed since, while frozen
+    if (slot == kAutoSlot && g_ahead.state.load() == 2) {
+        std::vector<uint8_t> delta;
+        size_t records = 0;
+        const auto ts = std::chrono::steady_clock::now();
+        {
+            auto d = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+            LOG("[savestate] sections: drain %.0f, threads %.0f, heaps %.0f, files+audio %.0f, gx2 %.0f, rest %.0f ms (%zu bytes)", d(tq, tg),
+                d(tg, tt), d(tt, th_), d(th_, ta), d(ta, tx), d(tx, ts), payload->b.size());
+        }
+        if (ahead_delta(delta, records)) {
+            const auto td = std::chrono::steady_clock::now();
+            g_ahead.state = 3;
+            threads::thaw();
+            std::vector<uint8_t> sc(ZSTD_compressBound(payload->b.size()));
+            size_t sn = ZSTD_compress(sc.data(), sc.size(), payload->b.data(), payload->b.size(), kZstdLevel);
+            double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            auto d = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+            LOG("[savestate] slot %d: %zu changed chunks captured as %.1f MB in %.1f ms (stage %s; quiesce %.0f, sections %.0f, chunks %.0f)",
+                slot, records, delta.size() / 1048576.0, ms, stage.c_str(), d(t0, tq), d(tq, ts), d(ts, td));
+            if (ZSTD_isError(sn)) {
+                std::lock_guard<std::mutex> lk(g_ahead.mu);
+                g_ahead.state = 2;
+                message("Slot %d: not saved (sections)", slot);
+                return true;
+            }
+            sc.resize(sn);
+            ahead_finish(h, std::move(sc), std::move(delta), records, stage.empty() ? "" : " (" + area_label(stage.c_str()) + ")");
+            return true;
+        }
+        LOG("[savestate] the capture ahead doesn't fit (memory regions or most of it changed): a full capture");
+        std::lock_guard<std::mutex> lk(g_ahead.mu);
+        int ready = 2;
+        if (g_ahead.state.compare_exchange_strong(ready, 0)) g_ahead.hashes.clear();  // made again for the next one
+    }
+    // header (its chunk count patched in at the end), sections, then the memory straight from the frozen game
+    bool ok = false;
+    StreamResult cap{};
+    std::string tmp = slot_path(slot, "tmp");
+    {
+        std::lock_guard<std::mutex> io(g_io);
+        std::vector<uint8_t> sc(ZSTD_compressBound(payload->b.size()));
+        size_t sn = ZSTD_compress(sc.data(), sc.size(), payload->b.data(), payload->b.size(), kZstdLevel);
+        FILE* f = ZSTD_isError(sn) ? nullptr : fopen(tmp.c_str(), "wb");
+        if (!f && !ZSTD_isError(sn)) {  // the folder was deleted while the game ran: made again
+            make_dirs(state_dir());
+            f = fopen(tmp.c_str(), "wb");
+        }
+        if (f) {
+            uint64_t sn64 = sn;
+            ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(&sn64, 8, 1, f) == 1 && fwrite(sc.data(), 1, sn, f) == sn;
+            std::mutex fm;
+            if (ok) cap = capture_to_file(f, fm);
+            ok = ok && cap.ok;
+            h.blocks = (uint32_t)cap.chunks;
+            ok = ok && fseek(f, offsetof(Header, blocks), SEEK_SET) == 0 && fwrite(&h.blocks, 4, 1, f) == 1;
+            ok = fclose(f) == 0 && ok;
+        }
+    }
     threads::thaw();
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     LOG("[savestate] slot %d: captured %.1f MB of memory as %.1f MB in %.1f ms (stage %s)", slot,
-        memory->addrs.size() * (double)kChunk / 1048576.0, memory->bytes() / 1048576.0, ms, stage.c_str());
-    gfx::request_tv_dump(slot_path(slot, "png"), 0);
-    // compress and write in the background; the game continues
-    std::thread([slot, h, payload, memory, stage] {
-        auto t1 = std::chrono::steady_clock::now();
-        bool ok;
-        {
-            std::lock_guard<std::mutex> io(g_io);
-            ok = write_slot(slot, h, payload->b, *memory);
-        }
-        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
-        struct stat st{};
-        stat(slot_path(slot).c_str(), &st);
-        LOG("[savestate] slot %d: %s (%.1f MB on disk, %.0f ms)", slot, ok ? "written" : "WRITE FAILED", st.st_size / 1048576.0, ms);
+        cap.chunks * (double)kChunk / 1048576.0, cap.bytes / 1048576.0, ms, stage.c_str());
+    {
+        std::lock_guard<std::mutex> io(g_io);
+        if (ok) ok = rename(tmp.c_str(), slot_path(slot).c_str()) == 0;
+        else unlink(tmp.c_str());
+    }
+    LOG("[savestate] slot %d: %s", slot, ok ? "written" : "WRITE FAILED");
+    if (ok && slot != kAutoSlot) gfx::request_tv_dump(slot_path(slot, "png"), 0);  // no thumbnail stall on the autosave
+    {
         std::lock_guard<std::mutex> lk(g_mu);
         g_message = ok ? "Saved to slot " + std::to_string(slot) + (stage.empty() ? "" : " (" + area_label(stage.c_str()) + ")")
                        : "Slot " + std::to_string(slot) + ": write failed";
         g_message_time = std::chrono::steady_clock::now();
-    }).detach();
+    }
     return true;
 }
 
@@ -965,12 +1298,12 @@ SlotInfo slot_info(int slot) {
 }
 
 void request_save(int slot) {
-    if (slot < 1 || slot > kSlots) return;
+    if (slot != kAutoSlot && (slot < 1 || slot > kSlots)) return;
     g_save_req = slot;
 }
 
 void request_load(int slot) {
-    if (slot < 1 || slot > kSlots) return;
+    if (slot != kAutoSlot && (slot < 1 || slot > kSlots)) return;
     if (g_loading.exchange(true)) return;
     std::thread([slot] {
         auto t0 = std::chrono::steady_clock::now();
@@ -991,7 +1324,7 @@ void request_load(int slot) {
             LOG("[savestate] slot %d: converted to version %u %s", slot, kVersion, ok ? "and written" : "but NOT written");
         }
         LOG("[savestate] slot %d: read %.1f MB (%zu memory chunks, version %u) in %.0f ms", slot,
-            (s->payload.size() + s->blob.size()) / 1048576.0, s->chunks.size(), s->h.version,
+            (s->payload.size() + s->blob.size() + s->mapSize) / 1048576.0, s->chunks.size(), s->h.version,
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
         std::lock_guard<std::mutex> lk(g_mu);
         g_load_ready = s;
@@ -1004,6 +1337,12 @@ std::string last_message() {
     return g_message;
 }
 
+// ---- autosave ----
+void set_autosave_seconds(int secs) { g_autosave_secs = secs < 0 ? 0 : secs; }
+int autosave_seconds() { return g_autosave_secs.load(); }
+void autosave_now() { if (g_autosave_secs.load() > 0) g_autosave_now = true; }
+bool autosave_busy() { return g_autosave_now.load() || g_save_req.load() == kAutoSlot || g_ahead.state.load() == 3; }
+
 void service(Cpu* c) {
     (void)c;
     static const std::vector<Timed> save_at = parse_timed("WWHD_STATE_SAVE_AT"), load_at = parse_timed("WWHD_STATE_LOAD_AT");
@@ -1015,6 +1354,58 @@ void service(Cpu* c) {
         for (auto& t : load_at)
             if (t.frame > last && t.frame <= f) request_load(t.slot);
         last = f;
+    }
+    // autosave: snapshot into kAutoSlot every g_autosave_secs, only while a file is actually being
+    // played (not the title / file select) and nothing else is saving or loading. A snapshot holds
+    // the game for ~0.5 s: once due it waits for a moment where that isn't felt (a game menu open,
+    // a dialogue, or 2-6 s after entering another area or room), at most another interval.
+    // autosave_now (the app going to the background, where Android may end it): at once, unless
+    // the last one is less than 30 s old.
+    {
+        using clk = std::chrono::steady_clock;
+        static clk::time_point last, areaSince;
+        static std::string area;
+        static bool saved = false;  // an autosave written in this session
+        const int secs = g_autosave_secs.load();
+        const auto now = clk::now();
+        const bool now_asked = g_autosave_now.exchange(false);
+        if (secs <= 0) {
+            last = clk::time_point{};
+        } else {
+            if (last == clk::time_point{}) last = now;
+            const uint32_t addr = mods::save_addr();
+            const bool playing = addr >= 0x10000000u && mods::save_loaded(addr);
+            std::string here = stage_name() + ":" + std::to_string((int)(int8_t)ld8(kStageInfo + kStageNameOff + 10));
+            if (here != area) {
+                area = here;
+                areaSince = now;
+                // another area: most of the memory changes, the capture ahead is made again
+                std::lock_guard<std::mutex> lk(g_ahead.mu);
+                int ready = 2;
+                if (g_ahead.state.compare_exchange_strong(ready, 0)) g_ahead.hashes.clear();
+            }
+            // the memory captured ahead some 20 s before the autosave is due (WWHD_AUTOSAVE_AHEAD=0: off)
+            static const bool aheadOn = !getenv("WWHD_AUTOSAVE_AHEAD") || atoi(getenv("WWHD_AUTOSAVE_AHEAD")) != 0;
+            if (aheadOn && playing && !g_loading.load() && now - last >= std::chrono::seconds(std::max(0, secs - std::min(20, secs / 2))))
+                ahead_start();
+            if (now_asked && playing && !g_save_req.load() && !g_loading.load() &&
+                (!saved || now - last >= std::chrono::seconds(30))) {
+                last = now;
+                saved = true;
+                request_save(kAutoSlot);
+            } else if (playing && !g_save_req.load() && !g_loading.load() && now - last >= std::chrono::seconds(secs)) {
+                const auto inArea = now - areaSince;
+                const bool calm = interp::menu_open() || mods::event_mode_now() == 1 ||
+                                  (inArea >= std::chrono::seconds(2) && inArea < std::chrono::seconds(6));
+                // and the capture ahead done (unless it is late)
+                const bool aheadDone = !aheadOn || g_ahead.state.load() != 1 || now - last >= std::chrono::seconds(secs + 30);
+                if ((calm && aheadDone) || now - last >= std::chrono::seconds(2 * secs)) {
+                    last = now;
+                    saved = true;
+                    request_save(kAutoSlot);
+                }
+            }
+        }
     }
     // test aid: WWHD_STATE_DUMP=n dumps the n TV frames after each save/load (state_<save|load><slot>_<k>.png)
     static const int dump = getenv("WWHD_STATE_DUMP") ? atoi(getenv("WWHD_STATE_DUMP")) : 0;
