@@ -432,4 +432,89 @@
         <item>Correction du centre + du bruit</item>
         <item>Désactivée</item>
     </string-array>
+    <!-- added upstream (Nycolazs) since the French translation -->
+    <string name="fg_multiplier_item_over">×%1$d (%2$d fps : plus que ce qu’affiche l’écran, aucune image générée)</string>
+    <string name="opt_autosave">Sauvegarde automatique</string>
+    <string name="opt_autosave_hint">Enregistre une sauvegarde instantanée dans l’emplacement Auto à cet intervalle pendant que vous jouez</string>
+    <string-array name="autosave_intervals">
+        <item>Désactivée</item>
+        <item>Toutes les minutes</item>
+        <item>Toutes les 2 min</item>
+        <item>Toutes les 5 min</item>
+        <item>Toutes les 10 min</item>
+    </string-array>
+    <string name="opt_slot_auto">Auto (sauvegarde automatique)</string>
+    <string name="fps_120">120 fps (écran 120 Hz)</string>
+    <string name="opt_button_style">Icônes des boutons</string>
+    <string name="opt_button_style_hint">Les symboles des boutons sur les commandes tactiles et dans le jeu (son HUD et ses textes) : Wii U, Xbox ou PlayStation, selon les boutons de manette que vous avez associés. Les icônes du jeu changent après un redémarrage</string>
+    <string-array name="button_styles">
+        <item>Wii U (Nintendo)</item>
+        <item>Xbox</item>
+        <item>PlayStation</item>
+    </string-array>
+    <string name="opt_area_blur">Flou fidèle à la console</string>
+    <string name="opt_area_blur_hint">Au-dessus de la résolution 1x : supprime la fine grille dans les ombres et autour des objets au sol. Demande du temps GPU</string>
+    <string name="opt_interp">Fréquence d’images</string>
+    <string name="opt_interp_hint">Interpolation d’images : des images intermédiaires entre les 30 fps du jeu. Demande un processeur rapide ; quand une image n’est pas prête à temps, elle est sautée et le jeu garde sa vitesse</string>
+    <string name="interp_off">30 fps (d’origine)</string>
+    <string name="interp_fps">%d fps (interpolées)</string>
+    <string name="cache_loading">Chargement du cache des shaders…</string>
+    <string name="cache_loading_detail">%1$,d variantes de shaders prêtes</string>
+    <string name="cache_building">Préparation de tous les shaders avant le démarrage du jeu…</string>
+    <string name="cache_building_detail">%1$,d sur %2$,d pipelines</string>
+    <string name="opt_dynamic_res">Résolution dynamique</string>
+    <string name="opt_dynamic_res_hint">Baisse la résolution 3D quand le GPU ne suit pas (jusqu’à 0,6x, pour que les téléphones peu puissants gardent leur fréquence d’images) ou que le téléphone chauffe (jusqu’à 1x), puis la remonte quand il y a de nouveau de la marge</string>
+    <string name="dynamic_res_now">Actuellement : %1$sx (charge GPU ou température)</string>
+    <string name="opt_shaders_at_start">Préparer tous les shaders au démarrage</string>
+    <string name="opt_shaders_at_start_hint">Compile pendant l’écran de chargement tous les shaders déjà utilisés par le jeu : aucune saccade en jouant, mais un chargement plus long. S’applique au prochain démarrage</string>
+    <string name="cheat_moon_jump">Saut lunaire</string>
+    <string name="cheat_moon_jump_hint">Maintenez L (gâchette haute gauche) pour monter, dirigez avec le stick gauche</string>
+    <string name="cheat_moon_rise">Saut lunaire : vitesse de montée</string>
+    <string name="cheat_moon_fly">Saut lunaire : vitesse de vol</string>
+    <string name="cheat_moon_nofall">Saut lunaire : pas de dégâts de chute</string>
+    <string name="cheat_moon_nofall_hint">L’atterrissage après un vol ne fait jamais de dégâts</string>
+    <string name="cheat_moon_anims">Saut lunaire : animations de décollage aléatoires</string>
+    <string name="cheat_moon_anims_hint">Chaque décollage choisit une pose parmi 14 au lieu des deux poses de saut</string>
+    <string name="opt_record_thread">Thread d’enregistrement des commandes</string>
+    <string name="opt_record_thread_hint">Un second thread CPU prépare le travail du GPU : plus rapide sur la plupart des appareils, plus lent sur certains (par ex. Snapdragon 855)</string>
+    <string-array name="record_thread_modes">
+        <item>Automatique</item>
+        <item>Activé</item>
+        <item>Désactivé</item>
+    </string-array>
+    <string name="record_thread_restart">Ce réglage s’applique après un redémarrage.</string>
+    <string name="gpu_lost_title">Le pilote GPU ne répond plus</string>
+    <string name="gpu_lost_system">Le jeu s’est fermé la dernière fois parce que le pilote GPU du téléphone s’est bloqué :\n%1$s\n\nCela peut arriver avec des pilotes système défectueux. Un pilote Turnip fait généralement tourner le jeu. Choisissez un paquet de pilote (un .zip au format AdrenoTools, par ex. une version récente de Turnip pour votre Adreno) pour l’utiliser désormais, ou lancez le jeu tel quel.</string>
+    <string name="gpu_lost_custom">Le jeu s’est fermé la dernière fois parce que le pilote GPU installé s’est bloqué :\n%1$s\n\nRevenez au pilote du système, choisissez un autre paquet de pilote, ou relancez le jeu avec celui-ci.</string>
+    <string name="gpu_lost_unknown_driver">(pilote inconnu)</string>
+    <string name="gpu_lost_start">Lancer le jeu</string>
+    <string name="gpu_lost_choose">Choisir un fichier de pilote…</string>
+    <string name="gpu_lost_choose_other">Un autre fichier de pilote…</string>
+    <string name="gpu_lost_system_driver">Revenir au pilote du système</string>
+    <string name="rotation_title">Rotation de l’écran</string>
+    <string name="rotation_message">Le système de ce téléphone garde l’écran en portrait et ignore que le jeu est uniquement en paysage : le jeu s’affiche donc dans une bande. Autorisez l’appli à modifier le réglage de rotation : elle verrouille l’écran en paysage pendant que vous jouez (selon le côté où vous tenez le téléphone), puis rétablit votre réglage quand vous quittez le jeu.</string>
+    <string name="rotation_allow">Autoriser</string>
+    <string name="crash_start_game">Lancer le jeu</string>
+    <string name="vault_title">Protéger vos sauvegardes</string>
+    <string name="vault_message">Autorisez « Accès à tous les fichiers » et l’appli garde une copie de votre sauvegarde du jeu, de vos sauvegardes instantanées et de vos réglages dans le dossier « %1$s » de votre téléphone. Elle y reste quand l’appli est désinstallée ou mise à jour, et une nouvelle installation récupère tout d’elle-même.</string>
+    <string name="vault_message_new">Il n’y a pas encore de sauvegarde. Si vous avez déjà joué, autorisez « Accès à tous les fichiers » et l’appli récupère d’elle-même votre sauvegarde du jeu, vos sauvegardes instantanées et vos réglages depuis le dossier « %1$s » (ou depuis les copies automatiques dans Téléchargements), puis les y garde désormais : une mise à jour ne les perdra jamais.</string>
+    <string name="vault_later">Pas maintenant</string>
+    <string name="vault_allow">Autoriser</string>
+    <string name="vault_on_toast">Vos sauvegardes sont maintenant aussi gardées dans le dossier « %1$s »</string>
+    <string name="vault_restored_title">Vos sauvegardes sont de retour</string>
+    <string name="vault_restoring">Récupération de vos sauvegardes…</string>
+    <string name="vault_part_save">votre sauvegarde du jeu</string>
+    <string name="vault_part_settings">vos réglages</string>
+    <string name="vault_restored">Récupéré depuis « %2$s » : %1$s.</string>
+    <string name="vault_restart">Les réglages s’appliquent après un redémarrage.</string>
+    <string name="opt_vault">Sauvegardes hors de l’appli</string>
+    <string name="opt_vault_hint">Désactivé : autorisez « Accès à tous les fichiers » pour garder dans le dossier « %1$s » une copie qui survit aux mises à jour et aux réinstallations</string>
+    <string name="opt_vault_hint_on">Votre sauvegarde du jeu, vos sauvegardes instantanées et vos réglages sont copiés dans le dossier « %1$s » à chaque changement ; une nouvelle installation les récupère d’elle-même</string>
+    <string name="vault_about_on">Votre sauvegarde du jeu, vos sauvegardes instantanées et vos réglages sont copiés dans le dossier « %1$s » de votre téléphone à chaque changement. Après une désinstallation ou une mise à jour de l’appli, la nouvelle installation les récupère d’elle-même si elle démarre sans sauvegarde. Ne supprimez pas ce dossier.</string>
+    <string name="opt_light">Mode graphique</string>
+    <string name="opt_light_hint">Léger : pour les GPU moins puissants. Sans occlusion ambiante ni ombres lointaines</string>
+    <string-array name="light_modes">
+        <item>Qualité</item>
+        <item>Léger</item>
+    </string-array>
 </resources>
