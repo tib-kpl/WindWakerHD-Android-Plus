@@ -35,8 +35,10 @@
 #include <vector>
 
 #include "countdown.h"
+#include "interp_joints.h"
 #include "interp_nodraw.h"
 #include "interp_pacing.h"
+#include "interp_sploosh.h"
 #include "guest_addr.h"
 #include <ctime>
 #include "platform.h"
@@ -545,16 +547,35 @@ namespace {
 constexpr uint32_t kMdlJoints = 0x2C, kJntMtx = 0x10, kJntNum = 0x2C;
 constexpr int kMaxJoints = 1024;
 
+const SplooshMarkers* g_sploosh_markers = nullptr;  // scoped to the board draw, main thread only
+
 struct ModelPrev {
+    uint8_t marker_cell = 0;  // Sploosh Kaboom: the board cell a pooled marker model stands for (interp_sploosh.h)
     uint32_t mtx = 0;
     uint64_t pass = 0;  // hold pass it was recorded on
     std::vector<uint32_t> w;  // raw guest words, 12 per matrix
+    std::vector<uint8_t> stale;  // per joint: hidden and not updated on that recording pass (interp_joints.h)
 };
 std::unordered_map<uint32_t, ModelPrev> g_models;
 // passes that record model history: record passes, and at 40 fps every logic pass too (consecutive
 // logic passes each blend from the step before)
 uint64_t g_model_pass = 0;
-struct ModelStats { uint32_t blended = 0, fresh = 0, cut = 0; } g_mstats;
+// shown: joints of blended models drawn at the current step (hidden pose joints coming back)
+struct ModelStats { uint32_t blended = 0, fresh = 0, cut = 0, shown = 0; } g_mstats;
+
+// Does joint `j` of `model` draw nothing? True when the joint has shapes of its own and every one is
+// hidden. HD J3D layout (as in daPy_lk_c::setDrawHandModel): model +0xAC model data; data +4 joint
+// count, +8 joint nodes (0x1C each); node +0x10 the first material of its mesh, material +4 the next
+// one, +8 its shape; shape +4 visible (u8). Joints without shapes (bones) count as drawn.
+bool joint_hidden(uint32_t data, uint32_t j) {
+    uint32_t mat = ld32(ld32(data + 8) + j * 0x1C + 0x10);
+    if (!mat) return false;
+    for (int guard = 0; mat && guard < 256; mat = ld32(mat + 4), guard++) {
+        const uint32_t shape = ld32(mat + 8);
+        if (!shape || ld8(shape + 4)) return false;
+    }
+    return !mat;
+}
 // models whose UBO update of this pass already ran on the main thread (blended), per model: the
 // update_ubo job skips that many of its updates
 std::mutex g_ubo_mu;
@@ -565,13 +586,39 @@ uint32_t fw(float f) { return __builtin_bswap32(f32_as_u32(f)); }
 
 // debug: WWHD_INTERP_MODEL_TRACE=n logs n draws of one model (the first with at least
 // WWHD_INTERP_MODEL_TRACE_JOINTS joints, default 40): root joint translation as drawn
+// _ALL=1 follows every eligible model; _START=n starts at logic step n. _FILE=path
+// also writes CSV: step,t,decision,joint-block,joint-count,joint-index,12 matrix floats.
+// _SPLOOSH=1 restricts it to the Sploosh Kaboom board markers (use _JOINTS=1).
 void trace_model(const char* what, uint32_t jnt, uint32_t n, const uint32_t* w) {
     static int left = getenv("WWHD_INTERP_MODEL_TRACE") ? atoi(getenv("WWHD_INTERP_MODEL_TRACE")) : 0;
     static const uint32_t min_joints = getenv("WWHD_INTERP_MODEL_TRACE_JOINTS") ? atoi(getenv("WWHD_INTERP_MODEL_TRACE_JOINTS")) : 40;
+    static const bool all = getenv("WWHD_INTERP_MODEL_TRACE_ALL") != nullptr;
+    static const uint64_t start = getenv("WWHD_INTERP_MODEL_TRACE_START") ? strtoull(getenv("WWHD_INTERP_MODEL_TRACE_START"), nullptr, 10) : 0;
+    static const bool sploosh = getenv("WWHD_INTERP_MODEL_TRACE_SPLOOSH") != nullptr;
+    if (sploosh) {
+        bool marker = false;
+        if (g_sploosh_markers)
+            for (const auto& m : *g_sploosh_markers)
+                if (m.model && ld32(m.model + kMdlJoints) == jnt) { marker = true; break; }
+        if (!marker) return;
+    }
     static uint32_t which = 0;
-    if (left <= 0 || n < min_joints || (which && which != jnt)) return;
+    if (left <= 0 || g_logic_steps < start || n < min_joints || (!all && which && which != jnt)) return;
     which = jnt;
     left--;
+    static FILE* matrices = [] {
+        const char* path = getenv("WWHD_INTERP_MODEL_TRACE_FILE");
+        return path ? fopen(path, "w") : nullptr;
+    }();
+    if (matrices) {
+        for (uint32_t joint = 0; joint < n; ++joint) {
+            fprintf(matrices, "%llu,%.6f,%s,%08X,%u,%u", (unsigned long long)g_logic_steps,
+                    pass_t(), what, jnt, n, joint);
+            for (int k = 0; k < 12; ++k) fprintf(matrices, ",%.9g", wf(w[joint * 12 + k]));
+            fputc('\n', matrices);
+        }
+        fflush(matrices);
+    }
     LOG("[interp] model %08X (%u joints, mtx %08X) step %llu t %.3f %-7s root %.2f %.2f %.2f", jnt, n, ld32(jnt + kJntMtx),
         (unsigned long long)g_logic_steps, pass_t(), what, wf(w[3]), wf(w[7]), wf(w[11]));
 }
@@ -639,6 +686,26 @@ void blend_mtx(const float* a, const float* b, float* out, float t) {
 void blend_world_matrix(const float* a, const float* b, float* out, float t) { blend_mtx(a, b, out, t); }
 }  // namespace interp
 
+// The Sploosh Kaboom board assigns its pooled J3D hit/miss models by scanning cells at +0x598
+// (021C4F34), so an earlier cell inserted by a shot shifts later assignments and a marker model
+// jumped (blended) from its old cell to its new one after a shot. That cell identity is carried into
+// the matrix history; the board, cursor, ships and models whose assignment stayed the same keep the
+// normal blending. From the original project (850b5435).
+extern "C" void f_021C4BB4_orig(Cpu* c);
+extern "C" void hook_021C4BB4(Cpu* c) {
+    using namespace interp;
+    if (!enabled()) { f_021C4BB4_orig(c); return; }
+    const uint32_t board = c->r[3];
+    const auto cells = sploosh_marker_cells(static_cast<const uint8_t*>(ppc_ptr(board + 0x598)));
+    SplooshMarkers markers{};
+    for (unsigned i = 0; i < markers.size(); ++i)
+        if (cells[i]) markers[i] = {ld32(board + 0x3BC + 4 * i), cells[i]};
+    const auto* previous = g_sploosh_markers;
+    g_sploosh_markers = &markers;
+    f_021C4BB4_orig(c);
+    g_sploosh_markers = previous;
+}
+
 // J3DModel::viewCalc(J3DModel*)
 extern "C" void hook_027F55FC(Cpu* c) {
     using namespace interp;
@@ -649,6 +716,7 @@ extern "C" void hook_027F55FC(Cpu* c) {
     }
     const bool record = record_pass();
     uint32_t model = c->r[3];
+    const uint8_t marker_cell = sploosh_marker_cell(g_sploosh_markers, model);
     uint32_t jnt = ld32(model + kMdlJoints);
     uint32_t mtx = jnt ? ld32(jnt + kJntMtx) : 0;
     uint32_t n = jnt ? ld16(jnt + kJntNum) : 0;
@@ -660,6 +728,17 @@ extern "C" void hook_027F55FC(Cpu* c) {
     const uint32_t* cur = (const uint32_t*)ppc_ptr(mtx);  // guest (big-endian) words
     auto remember = [&](const uint32_t* exact) {  // exact step: the history the next blended frames blend from
         ModelPrev& p = g_models[jnt];
+        // joints hidden and not written since the last recording pass: drawn at the next step instead
+        // of blended from here (interp_joints.h; a model drawn twice in a pass keeps its first decision)
+        if (p.pass != g_model_pass || p.stale.size() != n) {
+            const bool before = p.pass + 1 == g_model_pass && p.mtx == mtx && p.w.size() == words;
+            const uint32_t data = ld32(model + 0xAC);
+            const bool layout = data && ld32(data + 4) == n && ld32(data + 8);
+            p.stale.assign(n, 0);
+            for (uint32_t j = 0; layout && j < n; j++)
+                p.stale[j] = joints::stale(joint_hidden(data, j), exact + 12 * j, before ? p.w.data() + 12 * j : nullptr);
+        }
+        p.marker_cell = marker_cell;
         p.mtx = mtx;
         p.pass = g_model_pass;
         p.w.assign(exact, exact + words);
@@ -688,6 +767,12 @@ extern "C" void hook_027F55FC(Cpu* c) {
         f_027F55FC_orig(c);
         return;
     }
+    if (it->second.marker_cell != marker_cell) {  // a pooled Sploosh Kaboom marker now stands for another cell
+        g_mstats.fresh++;
+        trace_model("reassigned", jnt, n, cur);
+        f_027F55FC_orig(c);
+        return;
+    }
     const std::vector<uint32_t>& prev = it->second.w;
     if (memcmp(prev.data(), cur, 4 * words) == 0) {  // not moving
         trace_model("still", jnt, n, cur);
@@ -698,20 +783,28 @@ extern "C" void hook_027F55FC(Cpu* c) {
     const float t = pass_t();
     std::vector<uint32_t> saved(cur, cur + words);
     std::vector<uint32_t> mid(words);
-    for (uint32_t m = 0; m < n; m++) {
-        float a[12], b[12], o[12];
-        for (int k = 0; k < 12; k++) { a[k] = wf(prev[12 * m + k]); b[k] = wf(saved[12 * m + k]); }
-        float dx = a[3] - b[3], dy = a[7] - b[7], dz = a[11] - b[11];
-        if (!(dx * dx + dy * dy + dz * dz <= kCut * kCut)) {  // teleport (or NaN): show the new step
-            g_mstats.cut++;
-            trace_model("cut", jnt, n, cur);
-            f_027F55FC_orig(c);
-            return;
-        }
-        blend_mtx(a, b, o, t);
-        for (int k = 0; k < 12; k++) mid[12 * m + k] = fw(o[k]);
+    const auto r = joints::blend(prev.data(), saved.data(), it->second.stale.size() == n ? it->second.stale.data() : nullptr, n,
+                                 kCut, t, mid.data(), blend_mtx);
+    if (r.cut) {  // teleport (or NaN): show the new step
+        g_mstats.cut++;
+        trace_model("cut", jnt, n, cur);
+        f_027F55FC_orig(c);
+        return;
     }
     g_mstats.blended++;
+    g_mstats.shown += r.shown;
+    // debug: WWHD_INTERP_JOINT_TRACE=1 logs the hidden joints drawn at the current step (on the logic
+    // pass): how far the blend from their stale matrix would have moved them
+    static const bool joint_trace = getenv("WWHD_INTERP_JOINT_TRACE") != nullptr;
+    if (joint_trace && r.shown && !g_hold)
+        for (uint32_t j = 0; j < n; j++) {
+            const uint32_t* a = prev.data() + 12 * j;
+            const uint32_t* b = saved.data() + 12 * j;
+            if (!it->second.stale[j] || memcmp(a, b, 48) == 0) continue;
+            const float dx = wf(a[3]) - wf(b[3]), dy = wf(a[7]) - wf(b[7]), dz = wf(a[11]) - wf(b[11]);
+            LOG("[interp] step %llu: model %08X joint %u hidden on the last step, shown at %.1f %.1f %.1f (was %.1f away)",
+                (unsigned long long)g_logic_steps, model, j, wf(b[3]), wf(b[7]), wf(b[11]), std::sqrt(dx * dx + dy * dy + dz * dz));
+        }
     trace_model("blended", jnt, n, mid.data());
     {
         std::lock_guard<std::mutex> lk(g_ubo_mu);
@@ -1215,12 +1308,12 @@ extern "C" void hook_0203593C(Cpu* c) {
     static uint64_t n = 0, t0 = timebase::now(), f0 = 0;
     if (++n % 300 == 0) {
         uint64_t t = timebase::now();
-        LOG("[interp] %.1f logic steps/s (%s, %.2f frames per step); models per step: %.1f blended, %.1f new, %.1f cut%s",
+        LOG("[interp] %.1f logic steps/s (%s, %.2f frames per step); models per step: %.1f blended, %.1f new, %.1f cut (%.2f hidden joints shown)%s",
             300.0 * timebase::kTicksPerSec / (double)(t - t0), mode_name(), (frames - f0) / 300.0, g_mstats.blended / 300.0,
-            g_mstats.fresh / 300.0, g_mstats.cut / 300.0, pass_cpu_report().c_str());
+            g_mstats.fresh / 300.0, g_mstats.cut / 300.0, g_mstats.shown / 300.0, pass_cpu_report().c_str());
         t0 = t;
         f0 = frames;
-        g_mstats.blended = g_mstats.fresh = g_mstats.cut = 0;
+        g_mstats.blended = g_mstats.fresh = g_mstats.cut = g_mstats.shown = 0;
         for (auto it = g_models.begin(); it != g_models.end();)  // models no longer drawn
             it = it->second.pass + 2 < g_model_pass ? g_models.erase(it) : std::next(it);
     }

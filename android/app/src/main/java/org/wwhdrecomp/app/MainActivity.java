@@ -486,7 +486,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             String terr = Translation.installBuiltIn(this, ptbrDir(), new File(gameDir()));
             if (terr != null) Log.w(TAG, "translation: " + terr);
         }
-        Native.setContentOverlay(contentOverlay());
+        Native.setContentOverlay(ContentPacks.joinOverlays(ContentPacks.overlays(this, baseDir(), prefs), contentOverlay()));
         Native.start(gameDir(), new File(base, "save").getAbsolutePath(),
                 new File(getNoBackupFilesDir(), "shadercache").getAbsolutePath(), base.getAbsolutePath());
         started = true;
@@ -1782,21 +1782,27 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
     // the save or load happens at the next frame boundary: show its result when it's there
     void showStateResult() {
-        final String before = Native.saveStateMessage();
-        final long until = android.os.SystemClock.uptimeMillis() + 15000;
+        final String[] before = {Native.saveStateMessage()};
+        final long[] until = {android.os.SystemClock.uptimeMillis() + 15000};
         final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
         h.postDelayed(new Runnable() {
             @Override
             public void run() {
                 String m = Native.saveStateMessage();
-                if (!m.isEmpty() && !m.equals(before)) {
+                if (m.startsWith("Loading slot") && !m.equals(before[0])) {
+                    // a load from the title or the file select goes into the game first: the result follows
+                    android.widget.Toast.makeText(MainActivity.this, m, android.widget.Toast.LENGTH_LONG).show();
+                    before[0] = m;
+                    until[0] = android.os.SystemClock.uptimeMillis() + 130000;
+                    h.postDelayed(this, 200);
+                } else if (!m.isEmpty() && !m.equals(before[0])) {
                     // a loaded state brings its controls along: keep the setting in step
                     prefs.edit().putBoolean("pro_controller", proControllerSetting()).apply();
                     // a saved state (and, a moment later, its picture) copied out of the app
                     autoBackup();
                     h.postDelayed(MainActivity.this::autoBackup, 3000);
                     android.widget.Toast.makeText(MainActivity.this, m, android.widget.Toast.LENGTH_SHORT).show();
-                } else if (android.os.SystemClock.uptimeMillis() < until) {
+                } else if (android.os.SystemClock.uptimeMillis() < until[0]) {
                     h.postDelayed(this, 200);
                 }
             }
@@ -2277,7 +2283,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     // the menus' size, on top of fitting them to the screen (GameUi.fitted)
     static final float[] MENU_SIZES = {0.7f, 0.8f, 0.9f, 1f, 1.15f, 1.3f};
 
-    static final int PICK_EXPORT = 2, PICK_IMPORT = 3, PICK_DISC = 4, PICK_TRANSLATION = 5;
+    static final int PICK_EXPORT = 2, PICK_IMPORT = 3, PICK_DISC = 4, PICK_TRANSLATION = 5, PICK_PACK = 11;
     private boolean exportSave = true, exportStates = true;
 
     void chooseExport() {
@@ -2404,6 +2410,17 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         if (request == PICK_DRIVER) {
             if (result == RESULT_OK && data != null && data.getData() != null) installDriver(data.getData());
             else driverPickDone();  // cancelled: continue (the start after a GPU hang)
+            return;
+        }
+        if (request == PICK_PACK && result == RESULT_OK && data != null && data.getData() != null) {
+            android.net.Uri tree = data.getData();
+            withProgress(R.string.packs_installing, () -> ContentPacks.install(this, tree, baseDir()), err -> {
+                if (err != null) {
+                    new GameDialog(this).title(R.string.opt_packs).message(getString(R.string.packs_failed, err)).button(R.string.opt_ok, null).show();
+                    return;
+                }
+                askRestart(R.string.opt_packs);
+            });
             return;
         }
         if (request == PICK_TRANSLATION && result == RESULT_OK && data != null && data.getData() != null) {

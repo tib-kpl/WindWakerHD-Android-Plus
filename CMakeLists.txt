@@ -58,6 +58,9 @@ endif()
 add_library(cemu_latte STATIC ${CEMU_SOURCES})
 target_include_directories(cemu_latte PUBLIC ${CEMU_DIR} ${CEMU_DIR}/Cafe ${CMAKE_SOURCE_DIR}/runtime/third_party/fmt/include)
 target_compile_options(cemu_latte PRIVATE "SHELL:-include ${CEMU_DIR}/cemu_shim.h")
+# the decompiler reads which vertex attributes the CPU decodes (runtime/src/vk/vertex_cpu_policy.h);
+# after the vendored directories so their headers keep precedence
+target_include_directories(cemu_latte AFTER PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
 if(APPLE)
   target_include_directories(cemu_latte PUBLIC ${CMAKE_SOURCE_DIR}/runtime/third_party/metal-cpp)
   target_compile_definitions(cemu_latte PUBLIC ENABLE_METAL=1)
@@ -113,6 +116,9 @@ if(APPLE)
   # controls mapping unit tests (runtime/src/input_map.cpp)
   add_executable(input_map_test runtime/tools/input_map_test.cpp runtime/src/input_map.cpp)
   target_include_directories(input_map_test PRIVATE runtime/src)
+  # frame interpolation: hidden joints that were not updated (Link's hand poses) are drawn at the current step (runtime/src/interp_joints.h)
+  add_executable(interp_joints_test runtime/tools/interp_joints_test.cpp)
+  target_compile_options(interp_joints_test PRIVATE -UNDEBUG)
 
 elseif(ANDROID)
   # ---- Android: libwwhd.so, native GX2 on Vulkan; the Java activity in android/ loads it
@@ -208,7 +214,9 @@ elseif(ANDROID)
 "    .section .rodata
     .balign 16
     .global wwhd_ops_bc, wwhd_ops_bc_end, wwhd_hooks, wwhd_hooks_end, wwhd_release_eur, wwhd_release_eur_end
-    .global wwhd_release_jpn, wwhd_release_jpn_end
+    .global wwhd_release_jpn, wwhd_release_jpn_end, wwhd_hot_functions, wwhd_hot_functions_end
+wwhd_hot_functions: .incbin \"${HOOKS_DIR}/hot_functions.txt\"
+wwhd_hot_functions_end:
 wwhd_release_eur: .incbin \"${HOOKS_DIR}/release_eur.txt\"
 wwhd_release_eur_end:
 wwhd_release_jpn: .incbin \"${HOOKS_DIR}/release_jpn.txt\"
@@ -225,10 +233,12 @@ wwhd_hooks:
     .incbin \"${HOOKS_DIR}/hooks_aspect.txt\"
     .byte 10
     .incbin \"${HOOKS_DIR}/hooks_perf.txt\"
+    .byte 10
+    .incbin \"${HOOKS_DIR}/hooks_resmgr.txt\"
 wwhd_hooks_end:
 ")
     set_source_files_properties(${CMAKE_BINARY_DIR}/recomp_data.S PROPERTIES OBJECT_DEPENDS
-      "${OPS_BC};${HOOKS_DIR}/hooks.txt;${HOOKS_DIR}/hooks_climb.txt;${HOOKS_DIR}/hooks_mods.txt;${HOOKS_DIR}/hooks_aspect.txt;${HOOKS_DIR}/hooks_perf.txt;${HOOKS_DIR}/release_eur.txt;${HOOKS_DIR}/release_jpn.txt")
+      "${OPS_BC};${HOOKS_DIR}/hooks.txt;${HOOKS_DIR}/hooks_climb.txt;${HOOKS_DIR}/hooks_mods.txt;${HOOKS_DIR}/hooks_aspect.txt;${HOOKS_DIR}/hooks_perf.txt;${HOOKS_DIR}/hooks_resmgr.txt;${HOOKS_DIR}/hot_functions.txt;${HOOKS_DIR}/release_eur.txt;${HOOKS_DIR}/release_jpn.txt")
 
     if(WWHD_DEVICE_RECOMP)
       # The game code is linked at startup (loader.cpp). The game functions the runtime calls
