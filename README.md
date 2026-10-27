@@ -7,10 +7,17 @@
 >   téléphone en français l'affiche directement ; sinon, choisissez **Français** dans
 >   *Game → App language* (*Jeu → Langue de l'appli*). Le texte du jeu se règle à part, dans
 >   *Jeu → Langue du jeu*.
-> - **Petits correctifs** par-dessus la version Plus : bouton Retour des paramètres toujours visible,
->   onglets défilants et retour de MAP vers Objets / Sauvegarder avec Start.
+> - **Paramètres sans débordement** : le bouton bleu **Retour** garde sa place à l'écran.
+>   Les onglets défilent si nécessaire, et l'onglet sélectionné reste visible, même avec des menus agrandis.
+> - **Navigation entre les menus du jeu** : **Select / −** ouvre MAP, puis un second appui la ferme.
+>   **Start / +** ouvre **Objets / Sauvegarder**, y compris depuis MAP ; un nouvel appui ferme ce menu.
+> - **Commandes tactiles dans les menus hybrides** : le stick gauche, **L**, **X / Y / R** et **A / B**
+>   restent accessibles pour naviguer, équiper un objet, confirmer ou revenir en arrière.
+>   L'aide rappelle aussi que l'écran **Objets** est déjà l'inventaire, vide tant qu'aucun objet n'a été obtenu.
 > - **APK compilé automatiquement** à chaque commit par GitHub Actions et publié sur la
 >   **[page Releases](../../releases)**. Comme l'original, il ne contient ni code ni fichier du jeu.
+>
+> Ces correctifs ont été testés sur une **Odin 2 Portal**, avec les commandes intégrées et des menus à 100 % et 150 %.
 >
 > **Vous venez de la version Plus originale ?** Ces APK sont signés avec une autre clé : Android
 > refuse de les installer par-dessus. Exportez d'abord vos sauvegardes (**≡ → Saves → Export
