@@ -429,7 +429,7 @@
         <item>D-pad right</item>
     </string-array>
     <string name="opt_drc_display">GamePad screen</string>
-    <string name="opt_drc_display_hint">A second display was found (e.g. the lower screen of a dual-screen device)</string>
+    <string name="opt_drc_display_hint">A second display was found (e.g. the lower screen of a dual-screen device). TV only and Pro Controller leave this display to Android without showing the GamePad on it.</string>
     <string name="drc_second_display">Second display</string>
     <string name="drc_in_layout">In the screen layout</string>
     <string name="opt_gpu_driver">GPU driver</string>

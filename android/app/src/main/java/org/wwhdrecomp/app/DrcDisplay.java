@@ -45,9 +45,12 @@ final class DrcDisplay implements DisplayManager.DisplayListener {
 
     /** a second display the GamePad picture can use, or null */
     Display available() {
+        Display main = activity.getDisplay();
         Display[] d = displays.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
         for (Display x : d)
-            if (x.getDisplayId() != Display.DEFAULT_DISPLAY && x.isValid()) return x;
+            if (x.getDisplayId() != Display.DEFAULT_DISPLAY
+                    && (main == null || x.getDisplayId() != main.getDisplayId())
+                    && x.isValid()) return x;
         return null;
     }
 
@@ -99,7 +102,7 @@ final class DrcDisplay implements DisplayManager.DisplayListener {
     public void onDisplayRemoved(int id) { update(); }
 
     @Override
-    public void onDisplayChanged(int id) {}
+    public void onDisplayChanged(int id) { update(); }
 
     /** the presentation: a black window with the picture surface over the whole display */
     private static final class Screen extends Presentation implements SurfaceHolder.Callback {

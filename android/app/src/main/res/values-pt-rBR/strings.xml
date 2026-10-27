@@ -421,7 +421,7 @@
         <item>D-pad direita</item>
     </string-array>
     <string name="opt_drc_display">Tela do GamePad</string>
-    <string name="opt_drc_display_hint">Uma segunda tela foi encontrada (por exemplo a tela de baixo de um aparelho com duas telas)</string>
+    <string name="opt_drc_display_hint">Uma segunda tela foi encontrada (por exemplo a tela de baixo de um aparelho com duas telas). TV apenas e o Pro Controller deixam essa tela para o Android sem exibir o GamePad nela.</string>
     <string name="drc_second_display">Segunda tela</string>
     <string name="drc_in_layout">No layout da tela</string>
     <string name="opt_gpu_driver">Driver da GPU</string>

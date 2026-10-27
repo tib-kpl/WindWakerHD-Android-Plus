@@ -11,6 +11,9 @@
 >   Les onglets défilent si nécessaire, et l'onglet sélectionné reste visible, même avec des menus agrandis.
 > - **Navigation entre les menus du jeu** : **Select / −** ouvre MAP, puis un second appui la ferme.
 >   **Start / +** ouvre **Objets / Sauvegarder**, y compris depuis MAP ; un nouvel appui ferme ce menu.
+> - **Sortie HDMI en mode TV seule** : l’appli laisse Android afficher l’image principale sur la TV,
+>   au lieu de réserver cet écran au GamePad. Le mode manette Pro suit la même règle, et les changements
+>   de disposition, de manette ou d’écran sont pris en compte sans redémarrer le jeu.
 > - **Commandes tactiles dans les menus hybrides** : le stick gauche, **L**, **X / Y / R** et **A / B**
 >   restent accessibles pour naviguer, équiper un objet, confirmer ou revenir en arrière.
 >   L'aide rappelle aussi que l'écran **Objets** est déjà l'inventaire, vide tant qu'aucun objet n'a été obtenu.

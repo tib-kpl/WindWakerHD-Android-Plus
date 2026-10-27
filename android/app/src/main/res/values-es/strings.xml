@@ -408,7 +408,7 @@
         <item>Cruceta derecha</item>
     </string-array>
     <string name="opt_drc_display">Pantalla del GamePad</string>
-    <string name="opt_drc_display_hint">Se encontró una segunda pantalla (p. ej. la pantalla inferior de un dispositivo de doble pantalla)</string>
+    <string name="opt_drc_display_hint">Se encontró una segunda pantalla (p. ej. la pantalla inferior de un dispositivo de doble pantalla). TV sola y el mando Pro dejan esta pantalla a Android sin mostrar el GamePad en ella.</string>
     <string name="drc_second_display">Segunda pantalla</string>
     <string name="drc_in_layout">En el diseño de pantalla</string>
     <string name="opt_gpu_driver">Controlador de GPU</string>

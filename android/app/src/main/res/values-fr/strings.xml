@@ -374,7 +374,7 @@
         <item>Croix droite</item>
     </string-array>
     <string name="opt_drc_display">Écran du GamePad</string>
-    <string name="opt_drc_display_hint">Un second écran a été détecté (par ex. l’écran du bas d’un appareil à double écran)</string>
+    <string name="opt_drc_display_hint">Un second écran a été détecté (par ex. l’écran du bas d’un appareil à double écran). Le mode TV seule et la manette Pro laissent cet écran à Android, sans y afficher le GamePad.</string>
     <string name="drc_second_display">Second écran</string>
     <string name="drc_in_layout">Dans la disposition de l’écran</string>
     <string name="opt_gpu_driver">Pilote GPU</string>

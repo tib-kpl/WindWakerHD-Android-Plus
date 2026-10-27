@@ -1106,8 +1106,19 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     }
 
     private void updateDrcDisplay() {
-        if (drcDisplay == null) drcDisplay = new DrcDisplay(this, active -> updateLayout());
-        drcDisplay.setWanted(started && resumed && drcOnSecondDisplay());
+        if (drcDisplay == null) drcDisplay = new DrcDisplay(this, active -> {
+            // Presentation creation/dismissal can happen inside updateLayout. Recompute after
+            // that transition finishes rather than re-entering it from a display callback.
+            if (controls != null) controls.post(() -> {
+                if (!isDestroyed()) updateLayout();
+            });
+        });
+        // An HDMI display normally mirrors the main game window. Opening a GamePad Presentation
+        // takes that display away from mirroring, potentially replacing the TV image with black.
+        // TV-only and Pro Controller both explicitly leave the GamePad unused.
+        drcDisplay.setWanted(started && resumed && drcOnSecondDisplay()
+                && prefs.getInt("layout", LAYOUT_INSET) != LAYOUT_TV
+                && Native.getOption("pro_controller") == 0);
     }
 
     // hybrid layout: the TV full screen, the GamePad full screen while a game menu is open (touch menus
@@ -1134,6 +1145,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     };
 
     void updateLayout() {
+        // Layout/controller changes must also release an already attached GamePad display,
+        // including while the main surface is being recreated during HDMI hotplug.
+        updateDrcDisplay();
         if (surfaceW == 0 || surfaceH == 0 || controls == null) return;
         float W = surfaceW, H = surfaceH;
         RectF full = new RectF(0, 0, W, H);
