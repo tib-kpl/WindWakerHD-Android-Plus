@@ -517,7 +517,7 @@
         <item>Qualité</item>
         <item>Léger</item>
     </string-array>
-    <string name="opt_game_menu_hint">Select (?) ouvre MAP. Start (+) ouvre Objets / Sauvegarder et permet de revenir de MAP ; un nouvel appui sur Start referme Objets. Cet ?cran est d?j? l?inventaire : s?lectionnez un objet avec le stick gauche, A affiche sa description et X/Y/R l??quipe. L?inventaire est vide tant que vous n?avez rien obtenu dans le jeu.</string>
+    <string name="opt_game_menu_hint">Select (?) ouvre et ferme MAP. Start (+) ouvre Objets / Sauvegarder et permet de revenir de MAP ; un nouvel appui sur Start referme Objets. Cet ?cran est d?j? l?inventaire : s?lectionnez un objet avec le stick gauche, A affiche sa description et X/Y/R l??quipe. L?inventaire est vide tant que vous n?avez rien obtenu dans le jeu.</string>
     <string name="opt_select_map">Select ouvre la carte</string>
-    <string name="opt_select_map_hint">Select ouvre MAP ; Start revient ? Objets et Sauvegarder</string>
+    <string name="opt_select_map_hint">Select ouvre et ferme MAP ; Start revient ? Objets et Sauvegarder</string>
 </resources>

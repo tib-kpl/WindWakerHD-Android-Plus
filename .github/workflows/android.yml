@@ -53,6 +53,10 @@ jobs:
             android/app/src/main/java/org/wwhdrecomp/app/GameMenuInput.java \
             android/app/src/test/java/org/wwhdrecomp/app/GameMenuInputTest.java
           java -cp "$RUNNER_TEMP/menu-input-check" org.wwhdrecomp.app.GameMenuInputTest
+          c++ -std=c++20 -O2 -I runtime/include -I runtime/src -I runtime/third_party/fmt/include \
+            runtime/tools/menu_shortcut_test.cpp runtime/src/mods/map_shortcut.cpp \
+            -o "$RUNNER_TEMP/menu-shortcut-check"
+          "$RUNNER_TEMP/menu-shortcut-check"
 
       - name: Install NDK, CMake and Ninja
         run: |

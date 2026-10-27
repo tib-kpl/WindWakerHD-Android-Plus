@@ -537,5 +537,5 @@
     <string name="packs_failed">The pack couldn\'t be installed: %1$s</string>
     <string name="packs_not_found">No content folder in that pack (only Cemu\'s content packs are supported, not code patches).</string>
     <string name="packs_remove">Remove %1$s</string>
-    <string name="opt_game_menu_hint">Select (?) opens MAP. Start (+) opens Items / Save and returns there from MAP; another press of Start closes Items. Items is already your inventory: select an item with the left stick, press A for its description or X/Y/R to equip it. The inventory is empty until you obtain items in the game.</string>
+    <string name="opt_game_menu_hint">Select (?) opens and closes MAP. Start (+) opens Items / Save and returns there from MAP; another press of Start closes Items. Items is already your inventory: select an item with the left stick, press A for its description or X/Y/R to equip it. The inventory is empty until you obtain items in the game.</string>
 </resources>

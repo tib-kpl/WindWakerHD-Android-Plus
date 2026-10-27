@@ -20,6 +20,7 @@ namespace map_shortcut {
 namespace {
 const release::Data kIngameUi{0x101F8344};     // sIngameUi (hdIngameUi_c*, 0 outside gameplay)
 const release::Data kPlayState{0x1049EC00};    // l_ingamePlayState
+const release::Data kToPlayState{0x1049EBD4};  // normal menu closing transition
 const release::Data kToMenuState{0x1049EC84};  // l_ingameToMenuState (the menu opening)
 const release::Data kMenuState{0x1049ECB0};    // l_ingameMenuState
 const release::Code kCurrentState{0x02006478}; // the state machine's current state id
@@ -70,6 +71,14 @@ void step(Cpu* c, uint32_t ui) {
         g_opening_tab = tab;
         g_opening = kOpenFrames;
         LOG("[map] menu opens on %s", tab == kTabMap ? "MAP" : "Items");
+    } else if (menu && tab == kTabMap && ld32(ui + kUiTransitionTab) == kTabMap) {
+        // Select is a toggle. Close through the game's transition, and forget the forced MAP
+        // destination so a subsequent native + cannot reopen the stale MAP tab either.
+        guest_call(c, kChangeState, {ui + kUiState, kToPlayState});
+        st32(ui + kUiTransitionTab, kTabItems);
+        g_opening = 0;
+        g_context.store(0, std::memory_order_relaxed);
+        LOG("[map] Select closes MAP");
     } else if (menu || opening) {
         st32(ui + kUiTransitionTab, tab);
         if (opening) { g_opening_tab = tab; g_opening = kOpenFrames; }

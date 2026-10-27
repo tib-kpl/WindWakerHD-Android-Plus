@@ -521,7 +521,8 @@ press of Select** opens the game's menu on its **MAP** tab. Remap the buttons in
 Controller buttons**.
 
 With **Select opens the map** enabled, **Select (−)** opens **MAP** and **Start (+)** opens
-**Items / Save**, including when MAP is already open. Another press of Start in Items closes the
+**Items / Save**, including when MAP is already open. Another press of Select closes MAP;
+another press of Start in Items closes the
 menu. This also applies to the on-screen pause button and keyboard Enter. The Items screen is
 already your inventory: select an item with the left stick, press **A** for its description or
 **X / Y / R** to equip it. It is empty until you obtain items in the game. In Hybrid layout,
