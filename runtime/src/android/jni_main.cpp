@@ -621,10 +621,12 @@ JNI_FN(void, setOption)(JNIEnv* env, jclass, jstring name, jint value) {
     else if (n == "autosave_secs") ss::set_autosave_seconds(value);
     else if (n == "autosave_now") ss::autosave_now();
     else if (n == "open_map") map_shortcut::request();  // Select: the menu on its MAP tab
+    else if (n == "open_items") map_shortcut::request_items();
 }
 
 JNI_FN(jint, getOption)(JNIEnv* env, jclass, jstring name) {
     std::string n = jstr(env, name);
+    if (n == "menu_shortcut_context") return map_shortcut::context();
     if (n == "ao_mode") return gfx::ao_mode();
     if (n == "bloom_strength") return gfx::bloom_strength();
     if (n == "area_blur") return gfx::area_blur();

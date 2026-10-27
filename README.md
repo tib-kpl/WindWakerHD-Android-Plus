@@ -7,7 +7,8 @@
 >   téléphone en français l'affiche directement ; sinon, choisissez **Français** dans
 >   *Game → App language* (*Jeu → Langue de l'appli*). Le texte du jeu se règle à part, dans
 >   *Jeu → Langue du jeu*.
-> - **Petits correctifs** par-dessus la version Plus.
+> - **Petits correctifs** par-dessus la version Plus : bouton Retour des paramètres toujours visible,
+>   onglets défilants et retour de MAP vers Objets / Sauvegarder avec Start.
 > - **APK compilé automatiquement** à chaque commit par GitHub Actions et publié sur la
 >   **[page Releases](../../releases)**. Comme l'original, il ne contient ni code ni fichier du jeu.
 >
@@ -518,6 +519,13 @@ Connect any Bluetooth or USB gamepad. The touch controls disappear automatically
 screen to bring them back. **Hold Select** or **press Home** to open the settings menu. **A short
 press of Select** opens the game's menu on its **MAP** tab. Remap the buttons in **Controls →
 Controller buttons**.
+
+With **Select opens the map** enabled, **Select (−)** opens **MAP** and **Start (+)** opens
+**Items / Save**, including when MAP is already open. Another press of Start in Items closes the
+menu. This also applies to the on-screen pause button and keyboard Enter. The Items screen is
+already your inventory: select an item with the left stick, press **A** for its description or
+**X / Y / R** to equip it. It is empty until you obtain items in the game. In Hybrid layout,
+the on-screen left stick, **L**, **X / Y / R**, **A / B** and pause remain available in menus.
 
 ### Editing the HUD
 Open **≡ → Graphics → HUD layout**. Each part of the HUD gets a frame:

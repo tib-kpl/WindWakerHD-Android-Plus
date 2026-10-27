@@ -124,6 +124,8 @@ final class ControlsView extends View {
         add(new Ctl("dpad_right", K_BUTTON, Native.RIGHT, T, "→", "dpad_right_grapple", 0, 2.35f, 0, 2.75f, 0.85f));
         add(new Ctl("dpad_down", K_BUTTON, Native.DOWN, T, "↓", "dpad_down", 0, 1.7f, 0, 3.4f, 0.85f));
         add(new Ctl("zl", K_BUTTON, Native.ZL, TouchIcons.VIOLET, "ZL", "zl_target", 0, 1.1f, 0, 0.9f, 1.2f));
+        // L switches between the game's Items and Map screens (also with Pro Controller input).
+        add(new Ctl("l", K_BUTTON, Native.L, B, "L", "", 0, 2.6f, 0, 0.9f, 0.9f));
         add(new Ctl("zr", K_BUTTON, Native.ZR, TouchIcons.AMBER, "ZR", "zr_shield", 1, -1.1f, 0, 0.9f, 1.2f));
         add(new Ctl("fp", K_BUTTON, Native.STICK_R, B, "◉", "btn_first_person", 1, -2.6f, 0, 0.9f, 0.9f));
         add(new Ctl("a", K_BUTTON, Native.A, TouchIcons.GREEN, "A", "bubble_blank_a", 1, -1.3f, 1, -1.9f, 1.5f));
@@ -487,14 +489,17 @@ final class ControlsView extends View {
         return !hudKnown() || hudFlag(HUD_HAS_SWORD);  // the combat moves need a sword
     }
 
-    // the GamePad's touch menus fill the screen (hybrid layout): only A, B and pause stay
+    // The GamePad's touch menus fill the screen (hybrid layout). Keep the menu controls:
+    // L changes Items/Map, the left stick navigates, X/Y/R equip items, A/B confirm/go back.
     private boolean drcMenu;
 
     void setDrcMenu(boolean on) {
         if (on == drcMenu) return;
         drcMenu = on;
-        if (on) for (Ctl c : controls) if (!shown(c)) release(c);
-        invalidate();
+        // A gameplay gesture or combat macro must not keep running underneath the menu, and a
+        // menu gesture must not move Link when it closes. Publish the released input immediately.
+        releaseAll();
+        changed();
     }
 
     private boolean cutscene() { return hudFlag(HUD_CUTSCENE) && !editMode; }
@@ -507,7 +512,9 @@ final class ControlsView extends View {
         if (editMode) return true;
         if (c.kind == K_MENU || c.kind == K_EDIT) return menuShown;
         if (!controlsVisible) return false;
-        if (drcMenu && !(c.id.equals("a") || c.id.equals("b") || c.id.equals("pause"))) return false;
+        if (drcMenu && !(c.kind == K_STICK || c.bit == Native.L || c.bit == Native.A
+                || c.bit == Native.B || c.bit == Native.X || c.bit == Native.Y
+                || c.bit == Native.R || c.bit == Native.PLUS)) return false;
         if (c.kind == K_MACRO) return combatShown();
         // D-pad items Link doesn't have yet are hidden: the Wind Waker (up), the cannon (left: it fires
         // bombs) and the salvage hook (right)
@@ -763,7 +770,7 @@ final class ControlsView extends View {
         // exact hits first, then a little slack (thumbs are imprecise); the stick is a zone, not a button
         for (float slack : new float[] {1f, 1.25f})
             for (Ctl c : controls) {
-                if (!shown(c) || (c.kind == K_STICK && !editMode)) continue;
+                if (!shown(c) || (c.kind == K_STICK && !editMode && !drcMenu)) continue;
                 if (c.hit(x, y, slack)) return c;
             }
         return null;
@@ -851,6 +858,18 @@ final class ControlsView extends View {
                         c.pressed = true;
                         pointers.put(id, c);
                         changed = true;
+                        break;
+                    }
+                    if (c.kind == K_STICK) {
+                        // In a menu, only the visible stick captures navigation. Touches elsewhere
+                        // on the GamePad must still reach its tabs, Save and Options buttons.
+                        if (stickPointer < 0) {
+                            stickPointer = id;
+                            stickOx = c.cx;
+                            stickOy = c.cy;
+                            updateStick(x, y);
+                            changed = true;
+                        }
                         break;
                     }
                     if (c.kind == K_CAMSTICK) {

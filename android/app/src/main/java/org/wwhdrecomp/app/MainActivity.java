@@ -63,6 +63,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     private SurfaceView surface;
     private ControlsView controls;
     private final InputMapper mapper = new InputMapper();
+    private final GameMenuInput gameMenuInput = new GameMenuInput(Native.PLUS);
     private boolean autoHidden;
     private int surfaceW, surfaceH;
 
@@ -1187,6 +1188,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     private void pushInput() {
         if (controls == null) return;
         int b = controls.buttons() | mapper.padButtons | mapper.keyButtons;
+        // Select's native shortcut remembers MAP. A fresh + must select Items explicitly rather
+        // than closing that menu and reopening MAP. Apply to controllers, keyboard and touch alike.
+        b = gameMenuInput.filter(b, prefs.getBoolean("select_map", true),
+                Native.getOption("menu_shortcut_context"), () -> Native.setOption("open_items", 1));
         float lx = pick(controls.stickX(0), mapper.lx, mapper.keyLX());
         float ly = pick(controls.stickY(0), mapper.ly, mapper.keyLY());
         float rx = pick(controls.stickX(1), mapper.rx, mapper.keyRX());
@@ -1550,6 +1555,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         if (hasFocus) hideSystemBars();
         else if (started) {
             mapper.reset();
+            gameMenuInput.reset();
             pushInput();
         }
     }

@@ -46,6 +46,14 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Check game menu input routing
+        run: |
+          mkdir -p "$RUNNER_TEMP/menu-input-check"
+          javac -d "$RUNNER_TEMP/menu-input-check" \
+            android/app/src/main/java/org/wwhdrecomp/app/GameMenuInput.java \
+            android/app/src/test/java/org/wwhdrecomp/app/GameMenuInputTest.java
+          java -cp "$RUNNER_TEMP/menu-input-check" org.wwhdrecomp.app.GameMenuInputTest
+
       - name: Install NDK, CMake and Ninja
         run: |
           sudo apt-get update && sudo apt-get install -y ninja-build

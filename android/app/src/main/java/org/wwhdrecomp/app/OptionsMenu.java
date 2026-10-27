@@ -27,6 +27,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -53,6 +54,7 @@ final class OptionsMenu extends Dialog {
     private int tab;
     private LinearLayout rows;
     private ScrollView scroll;
+    private HorizontalScrollView tabScroll;
     private static final int TABS = 5;
     // Saves, Graphics, Mods, Controls
     private static final GameUi.Palette[] TAB_COLORS = {GameUi.GREEN, GameUi.VIOLET, GameUi.BLUE, GameUi.AMBER, GameUi.CORAL};
@@ -87,9 +89,17 @@ final class OptionsMenu extends Dialog {
         plp.setMargins(px(26), px(18), px(26), px(18));
         root.addView(panel, plp);
 
-        // tabs and Back
+        // Keep Back outside the scrolling tabs: translations, larger fonts and menu sizes can
+        // make the five tabs wider than the screen.
         LinearLayout top = new LinearLayout(getContext());
         top.setGravity(Gravity.CENTER_VERTICAL);
+        tabScroll = new HorizontalScrollView(getContext());
+        tabScroll.setHorizontalScrollBarEnabled(false);
+        tabScroll.setHorizontalFadingEdgeEnabled(true);
+        tabScroll.setFadingEdgeLength(px(16));
+        LinearLayout tabStrip = new LinearLayout(getContext());
+        tabScroll.addView(tabStrip, new FrameLayout.LayoutParams(-2, -2));
+        top.addView(tabScroll, new LinearLayout.LayoutParams(0, -2, 1));
         int[] names = {R.string.opt_saves, R.string.opt_game, R.string.opt_graphics, R.string.opt_mods, R.string.opt_controls};
         for (int i = 0; i < TABS; i++) {
             final int t = i;
@@ -105,12 +115,12 @@ final class OptionsMenu extends Dialog {
             tabs[i] = v;
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
             lp.rightMargin = px(8);
-            top.addView(v, lp);
+            tabStrip.addView(v, lp);
         }
-        View spacer = new View(getContext());
-        top.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
         TextView back = barButton(a.getString(R.string.opt_back), v -> dismiss());
-        top.addView(back, new LinearLayout.LayoutParams(px(130), px(46)));
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(px(130), px(46));
+        backLp.leftMargin = px(12);
+        top.addView(back, backLp);
         panel.addView(top, new LinearLayout.LayoutParams(-1, -2));
 
         // actions on the left, the tab's settings on the right
@@ -136,7 +146,16 @@ final class OptionsMenu extends Dialog {
         hint.setGravity(Gravity.END);
         panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
 
+        // Fullscreen windows extend into the cutout. Keep every control inside the safe area,
+        // including when transient system bars are hidden.
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            android.graphics.Insets safe = insets.getInsetsIgnoringVisibility(
+                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            v.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+            return insets;
+        });
         setContentView(root);
+        root.requestApplyInsets();
         WindowInsetsController ic = w.getInsetsController();  // the window's views exist from here on
         if (ic != null) {
             ic.hide(WindowInsets.Type.systemBars());
@@ -355,6 +374,20 @@ final class OptionsMenu extends Dialog {
             tabs[i].setTextSize(on ? 24 : 20);
             ((GameUi.OutlinedText) tabs[i]).outline = on ? pal.dark : pal.muted().dark;
         }
+        TextView selected = tabs[t];
+        // The selected tab's font is larger. Scroll only after its new width has been measured,
+        // otherwise its right edge can still be clipped when changing tabs with L/R.
+        selected.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                selected.getViewTreeObserver().removeOnPreDrawListener(this);
+                int x = tabScroll.getScrollX();
+                if (selected.getLeft() < x) x = selected.getLeft();
+                else if (selected.getRight() + px(8) > x + tabScroll.getWidth())
+                    x = selected.getRight() + px(8) - tabScroll.getWidth();
+                tabScroll.scrollTo(x, 0);
+                return true;
+            }
+        });
         fill();
         scroll.scrollTo(0, 0);
     }
@@ -823,6 +856,7 @@ final class OptionsMenu extends Dialog {
     }
 
     private void controls() {
+        note(a.getString(R.string.opt_game_menu_hint));
         toggle(R.string.opt_onscreen, 0, a.prefs.getBoolean("controls_visible", true), a::setControlsVisible);
         String[] sizes = new String[MainActivity.CONTROL_SIZES.length];
         int cur = 2;
